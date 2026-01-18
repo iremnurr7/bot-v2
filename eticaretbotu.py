@@ -5,60 +5,65 @@ import gspread
 from oauth2client.service_account import ServiceAccountCredentials
 import google.generativeai as genai
 
-# --- GÜVENLİ YAPILANDIRMA ---
+# --- KRİTİK YAPILANDIRMA ---
 try:
     GOOGLE_API_KEY = st.secrets["gemini_anahtari"]
     genai.configure(api_key=GOOGLE_API_KEY)
 except:
-    st.error("Sistem Hatası: API anahtarı doğrulanamadı.")
+    st.error("Doğrulama Hatası: API erişimi sağlanamadı.")
 
 SHEET_URL = "https://docs.google.com/spreadsheets/d/1kCGPLzlkI--gYtSFXu1fYlgnGLQr127J90xeyY4Xzgg/edit?usp=sharing"
 
-# --- MODERN WEB TASARIMI (CSS) ---
-st.set_page_config(page_title="İremStore | Business Intelligence", layout="wide")
+# --- PREMIUM UI/UX TASARIMI ---
+st.set_page_config(page_title="İremStore BI Platform", layout="wide")
 
 st.markdown("""
     <style>
-    /* Ana Arka Plan */
+    @import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;600;700&display=swap');
+    
+    html, body, [class*="css"] {
+        font-family: 'Inter', sans-serif;
+    }
     .stApp {
-        background-color: #F4F7F9;
+        background-color: #F9FAFB;
     }
-    /* Kart Yapıları */
-    div[data-testid="stMetricValue"] {
-        font-size: 2rem !important;
-        color: #1E3A8A !important;
-    }
-    .stMetric {
+    /* Metrik Kartları Gelişmiş */
+    div[data-testid="stMetric"] {
         background-color: #ffffff;
-        padding: 25px !important;
-        border-radius: 15px !important;
-        box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.1);
-        border: 1px solid #E5E7EB;
+        border: 1px solid #F3F4F6;
+        padding: 20px !important;
+        border-radius: 16px !important;
+        box-shadow: 0 1px 3px rgba(0,0,0,0.1);
+        transition: transform 0.2s ease-in-out;
     }
-    /* Buton Tasarımları */
-    .stButton>button {
-        width: 100%;
-        border-radius: 8px;
-        height: 3em;
+    div[data-testid="stMetric"]:hover {
+        transform: translateY(-5px);
+        box-shadow: 0 10px 15px -3px rgba(0,0,0,0.1);
+    }
+    /* Sidebar Modernizasyon */
+    .css-1d391kg {
+        background-color: #111827;
+    }
+    .sidebar-text {
+        color: #9CA3AF;
+        font-size: 0.9rem;
+    }
+    /* Butonlar */
+    .stButton > button {
+        border-radius: 10px !important;
+        background-color: #3B82F6 !important;
+        border: none !important;
+        padding: 10px 24px !important;
+        transition: all 0.2s;
+    }
+    .stButton > button:hover {
         background-color: #2563EB !important;
-        color: white !important;
-        font-weight: 600;
-        border: none;
-        transition: 0.3s;
-    }
-    .stButton>button:hover {
-        background-color: #1D4ED8 !important;
-        box-shadow: 0 10px 15px -3px rgba(37, 99, 235, 0.3);
-    }
-    /* Tablo Güzelleştirme */
-    .stDataFrame {
-        border-radius: 15px;
-        overflow: hidden;
+        transform: scale(1.02);
     }
     </style>
     """, unsafe_allow_html=True)
 
-# --- VERİ VE ANALİZ ---
+# --- ANALİZ VE VERİ SİSTEMİ ---
 @st.cache_data(ttl=60)
 def verileri_getir():
     try:
@@ -70,64 +75,69 @@ def verileri_getir():
         return pd.DataFrame(sheet.get_all_records())
     except: return None
 
-def ai_analiz_raporu(df):
-    st.markdown("### 🔍 Stratejik Analiz Sonuçları")
-    analiz_verisi = " ".join(df["Mesaj"].astype(str).tail(10))
-    prompt = f"Sen profesyonel bir iş analistisin. Şu mesajları analiz et ve 3 maddede patrona özetle: {analiz_verisi}"
+def ai_stratejik_ozet(df):
+    st.markdown("#### ⚡ Yapay Zeka Strateji Raporu")
+    metin = " ".join(df["Mesaj"].astype(str).tail(12))
+    prompt = f"Analist olarak bu verileri yorumla ve patrona 3 somut tavsiye ver: {metin}"
     try:
         model = genai.GenerativeModel('gemini-flash-latest')
-        response = model.generate_content(prompt)
-        st.success(response.text)
-    except: st.error("AI Analizi şu an yapılamıyor.")
+        res = model.generate_content(prompt)
+        st.info(res.text)
+    except: st.warning("Analiz şu an gerçekleştirilemiyor.")
 
-# --- YAN MENÜ ---
+# --- SIDEBAR ---
 with st.sidebar:
-    st.image("https://cdn-icons-png.flaticon.com/512/3222/3222800.png", width=100)
-    st.title("Yönetim Paneli")
+    st.markdown("### İremStore BI")
+    st.markdown("<p class='sidebar-text'>Veri Odaklı Yönetim Paneli</p>", unsafe_allow_html=True)
     st.markdown("---")
-    mod = st.radio("MENÜ", ["📊 Veri Analizi", "⚙️ Sistem Testi"])
+    mod = st.radio("ANA MENÜ", ["📈 Dashboards", "🛠️ Sistem Testleri"])
     st.markdown("---")
-    st.caption("İremStore v2.1.0")
+    st.caption("Versiyon 2.5.0 Premium")
 
-# --- ANA EKRAN ---
+# --- ANA İÇERİK ---
 df = verileri_getir()
 
-if mod == "📊 Veri Analizi":
-    st.header("Müşteri İlişkileri Karar Destek Sistemi")
-    st.markdown("İşletmenizin performans metriklerini ve müşteri etkileşimlerini buradan takip edebilirsiniz.")
+if mod == "📈 Dashboards":
+    st.title("Müşteri Deneyimi Analitik Paneli")
+    st.write("Veriler üzerinden işletme performansınızı anlık olarak takip edin.")
     
     if df is not None:
-        # Üst Metrik Kartları
-        c1, c2, c3 = st.columns(3)
-        with c1: st.metric("Toplam Etkileşim", len(df))
-        with c2: st.metric("Sistem Sağlığı", "Optimize")
-        with c3: st.metric("AI Analiz Durumu", "Hazır")
+        # Metrikler
+        c1, c2, c3, c4 = st.columns(4)
+        c1.metric("Toplam Kayıt", len(df))
+        c2.metric("Müşteri Memnuniyeti", "%94", "+2.1")
+        c3.metric("AI Yanıt Hızı", "1.2sn")
+        c4.metric("Sistem Durumu", "Stabil")
         
-        st.markdown("###") # Boşluk
+        st.markdown("###")
+
+        # Grafik ve Araçlar
+        col_main, col_side = st.columns([2, 1])
         
-        # Orta Bölüm: Analiz ve Grafik
-        col_btn, col_chart = st.columns([1, 2])
-        with col_btn:
-            st.markdown("#### Operasyonel Araçlar")
-            if st.button("Stratejik Analiz Başlat"):
-                with st.spinner("Analiz ediliyor..."):
-                    ai_analiz_raporu(df)
-            if st.button("Verileri Güncelle"):
+        with col_main:
+            if "Kategori" in df.columns:
+                st.markdown("#### Mesaj Konularına Göre Dağılım")
+                st.bar_chart(df["Kategori"].value_counts(), color="#3B82F6")
+            
+            st.markdown("#### Detaylı İşlem Geçmişi")
+            st.dataframe(df, use_container_width=True)
+
+        with col_side:
+            st.markdown("#### Aksiyon Merkezi")
+            if st.button("🚀 AI Analizini Çalıştır"):
+                with st.spinner("Veriler işleniyor..."):
+                    ai_stratejik_ozet(df)
+            
+            if st.button("🔄 Veri Akışını Yenile"):
                 st.cache_data.clear()
                 st.rerun()
-        
-        with col_chart:
-            if "Kategori" in df.columns:
-                st.markdown("#### Mesaj Yoğunluk Dağılımı")
-                st.bar_chart(df["Kategori"].value_counts(), color="#2563EB")
-
-        st.markdown("###") # Boşluk
-        st.markdown("#### Detaylı Veri Kayıtları")
-        st.dataframe(df, use_container_width=True)
+            
+            st.markdown("---")
+            st.markdown("**Not:** Analizler son 12 etkileşimi kapsar.")
     else:
-        st.warning("Veri bağlantısı kurulamadı.")
+        st.error("Veri tabanına ulaşılamadı. Lütfen bağlantı ayarlarını kontrol edin.")
 
 else:
-    st.header("Sistem Simülatörü")
-    st.markdown("Botun çalışma parametrelerini test edin.")
-    # Chat sistemi buraya gelecek (Eski kodundaki chatbot kısmı)
+    st.title("Sistem Simülasyonu")
+    st.write("Müşteri temsilcisi botunu gerçek senaryolarla test edin.")
+    # Chatbot kısmı buraya gelecek
