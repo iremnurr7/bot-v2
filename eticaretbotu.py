@@ -5,12 +5,15 @@ import gspread
 from oauth2client.service_account import ServiceAccountCredentials
 import google.generativeai as genai
 
-# --- AYARLAR ---
-GOOGLE_API_KEY = "AIzaSyB1C5JDPFbolsCZC4-UBzr0wTgSOc0ykS8"
-SHEET_URL = "https://docs.google.com/spreadsheets/d/1kCGPLzlkI--gYtSFXu1fYlgnGLQr127J90xeyY4Xzgg/edit?usp=sharing"
+# --- GÜVENLİ AYARLAR (Secrets'tan Okunur) ---
+# Artık anahtarları buraya yazmıyoruz, Streamlit Secrets panelinden alıyoruz.
+try:
+    GOOGLE_API_KEY = st.secrets["gemini_anahtari"]
+    genai.configure(api_key=GOOGLE_API_KEY)
+except:
+    st.error("Hata: 'gemini_anahtari' Secrets içinde bulunamadı!")
 
-# Yapay Zeka Kurulumu
-genai.configure(api_key=GOOGLE_API_KEY)
+SHEET_URL = "https://docs.google.com/spreadsheets/d/1kCGPLzlkI--gYtSFXu1fYlgnGLQr127J90xeyY4Xzgg/edit?usp=sharing"
 
 # Sayfa Ayarı
 st.set_page_config(page_title="İremStore Master Panel", page_icon="🛍️", layout="wide")
@@ -20,15 +23,16 @@ st.set_page_config(page_title="İremStore Master Panel", page_icon="🛍️", la
 def verileri_getir():
     try:
         scope = ['https://spreadsheets.google.com/feeds', 'https://www.googleapis.com/auth/drive']
+        
+        # Secrets içindeki JSON anahtarını sözlüğe çeviriyoruz
         key_dict = json.loads(st.secrets["google_anahtari"]["dosya_icerigi"])
         creds = ServiceAccountCredentials.from_json_keyfile_dict(key_dict, scope)
+        
         client = gspread.authorize(creds)
         sheet = client.open_by_url(SHEET_URL).sheet1
         return pd.DataFrame(sheet.get_all_records())
     except Exception as e:
-        # --- BU SATIRI EKLE ---
-        st.error(f"Sistemsel Hata: {e}") 
-        # ----------------------
+        st.error(f"Sistemsel Hata (Sheets): {e}") 
         return None
 
 # --- YAN MENÜ (MOD SEÇİMİ) ---
@@ -50,38 +54,32 @@ if mod == "📊 Canlı Panel (Gerçek)":
     df = verileri_getir()
     
     if df is not None and not df.empty:
-        # Metrikler
         col1, col2, col3 = st.columns(3)
         col1.metric("Toplam Mesaj", len(df))
         col2.metric("Son Mesaj", df.iloc[-1]["Gonderen"] if "Gonderen" in df.columns else "-")
         col3.metric("Sistem", "Aktif", "🟢")
         
-        # Tablo
         st.dataframe(df, use_container_width=True)
         
-        # Grafik
         if "Kategori" in df.columns:
             st.subheader("Kategori Analizi")
             st.bar_chart(df["Kategori"].value_counts())
     else:
-        st.warning("Veri çekilemedi. Şunları kontrol et: 1. Secrets'ı kaydettin mi? 2. Koddaki 'google_anahtari' ismi doğru mu?")
+        st.warning("Veri şu an çekilemiyor. Secrets ve Paylaşım ayarlarını kontrol et.")
 
 # ==========================================
 # MOD 2: AI SİMÜLATÖR (Test Alanı)
 # ==========================================
 elif mod == "🧪 AI Simülatör (Test)":
     st.title("🧪 Yapay Zeka Laboratuvarı")
-    st.markdown("Burada botu müşteriye açmadan önce **test edebilirsin.**")
+    st.markdown("Bot kurallarını soldan değiştirip anında test edebilirsin.")
     
-    # --- AYARLAR (SOL MENÜ) ---
     st.sidebar.markdown("---")
     st.sidebar.header("⚙️ Bot Kuralları")
     
     firma_adi = st.sidebar.text_input("Firma Adı", "İremStore")
     iade_suresi = st.sidebar.slider("İade Süresi (Gün)", 14, 90, 30)
     kargo_ucreti = st.sidebar.number_input("Kargo Ücreti (TL)", 0, 100, 50)
-    
-    st.sidebar.info(f"📝 Kural: İade {iade_suresi} gün, Kargo {kargo_ucreti} TL.")
 
     if "messages" not in st.session_state:
         st.session_state.messages = []
@@ -98,9 +96,8 @@ elif mod == "🧪 AI Simülatör (Test)":
 
         system_prompt = f"""
         Sen {firma_adi} adında bir markanın müşteri temsilcisisin.
-        Kurallar: İade süresi {iade_suresi} gün, kargo ücreti {kargo_ucreti} TL.
-        Çok kibar ve çözüm odaklı davran.
-        Müşteri sorusu: {prompt}
+        İade: {iade_suresi} gün, Kargo: {kargo_ucreti} TL. Kibar ol.
+        Müşteri: {prompt}
         """
 
         try:
@@ -110,8 +107,7 @@ elif mod == "🧪 AI Simülatör (Test)":
             
             with st.chat_message("assistant"):
                 st.markdown(bot_reply)
-            
             st.session_state.messages.append({"role": "assistant", "content": bot_reply})
             
         except Exception as e:
-            st.error(f"Hata oluştu: {e}")
+            st.error(f"AI Hatası: {e}")
