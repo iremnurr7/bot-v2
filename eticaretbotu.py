@@ -2,6 +2,7 @@ import json
 import streamlit as st
 import pandas as pd
 import gspread
+import plotly.express as px # YENİ: Grafikler için gerekli
 from oauth2client.service_account import ServiceAccountCredentials
 import google.generativeai as genai
 
@@ -71,7 +72,11 @@ def verileri_getir():
         creds = ServiceAccountCredentials.from_json_keyfile_dict(key_dict, scope)
         client = gspread.authorize(creds)
         sheet = client.open_by_url(SHEET_URL).sheet1
-        return pd.DataFrame(sheet.get_all_records())
+        df = pd.DataFrame(sheet.get_all_records())
+        # YENİ: Sütun isimlerini standartlaştırıyoruz ki grafikler hata vermesin
+        if not df.empty and len(df.columns) >= 6:
+            df.columns = ["Tarih", "Kimden", "Konu", "Mesaj", "Kategori", "AI_Cevap"]
+        return df
     except: return None
 
 def ai_analiz_yap(df):
@@ -94,43 +99,51 @@ with st.sidebar:
         f_adi = st.text_input("Şirket", "İremStore")
         iade = st.slider("İade", 14, 90, 30)
         kargo = st.number_input("Kargo", 0, 200, 50)
-    st.caption("v3.1.0 Premium")
+    st.caption("v3.2.0 Pro Analytics")
 
 # --- ANA İÇERİK ---
 df = verileri_getir()
 
 if mod == "📊 Dashboards":
-    st.title("Stratejik Karar Destek Merkezi")
+    st.title("🚀 Stratejik Karar Destek Merkezi")
     
-    if df is not None:
-        tab1, tab2, tab3 = st.tabs(["📉 Genel Analiz", "🧠 AI Strateji", "📋 Ham Veri"])
+    if df is not None and not df.empty:
+        # --- ÜST KPI KARTLARI (YENİ) ---
+        kp1, kp2, kp3 = st.columns(3)
+        
+        toplam_mail = len(df)
+        # Sadece IADE kategorisindekileri say
+        iade_sayisi = len(df[df["Kategori"] == "IADE"])
+        # AI cevabında 'dolmuştur' veya 'red' geçenleri say (Otomatik engellenenler)
+        reddedilenler = len(df[df["AI_Cevap"].str.contains("dolmuştur|red|geçmiş", case=False, na=False)])
+        
+        kp1.metric("Toplam Gelen Mail", toplam_mail, border=True)
+        kp2.metric("İade Talepleri", iade_sayisi, f"Genelin %{(iade_sayisi/toplam_mail)*100:.1f}'i", border=True)
+        kp3.metric("⛔ Botun Reddettiği", reddedilenler, "Otomatik Koruma", border=True)
+
+        st.markdown("---")
+
+        tab1, tab2, tab3 = st.tabs(["📉 Görsel Analiz", "🧠 AI Strateji", "📋 Detaylı Veri"])
         
         with tab1:
-            basari_orani = 98.4 if len(df) > 10 else 95.0
+            col_grafik1, col_grafik2 = st.columns(2)
             
-            m1, m2, m3, m4 = st.columns(4)
-            m1.metric("Toplam Etkileşim", len(df), "+12%")
-            m2.metric("Müşteri Skoru", "4.7/5", help="Gelen mesajların duygu analizi ortalaması.")
-            m3.metric(
-                label="AI Çözülme Oranı", 
-                value=f"%{basari_orani}", 
-                help="Sistemin son 100 mesajı insan müdahalesi olmadan doğru anlama ve çözümleme başarısıdır."
-            )
-            m4.metric("Sistem Sağlığı", "Optimize")
-            
-            st.markdown("###")
-            
-            col_trend, col_dist = st.columns([2, 1])
-            with col_trend:
-                st.markdown("#### Mesaj Yoğunluk Trendi")
-                st.line_chart(df.index, color="#3B82F6")
-            with col_dist:
-                st.markdown("#### Kategori Dağılımı")
-                # HATA ÇÖZÜMÜ: Sütun kontrolü
-                if "Kategori" in df.columns:
-                    st.bar_chart(df["Kategori"].value_counts(), color="#60A5FA")
-                else:
-                    st.warning("Grafik oluşturulamadı: 'Kategori' sütunu Google Sheets'te bulunamadı.")
+            with col_grafik1:
+                st.subheader("📁 Müşteri Ne İstiyor?")
+                # Pasta Grafiği
+                kategori_ozet = df["Kategori"].value_counts().reset_index()
+                kategori_ozet.columns = ["Kategori", "Adet"]
+                fig_pie = px.pie(kategori_ozet, values='Adet', names='Kategori', 
+                                 title='Kategori Dağılımı', 
+                                 color_discrete_sequence=px.colors.sequential.RdBu)
+                st.plotly_chart(fig_pie, use_container_width=True)
+
+            with col_grafik2:
+                st.subheader("📅 Günlük Mesaj Trafiği")
+                # Tarih verisini sadeleştirme (sadece gün)
+                df["Gun"] = pd.to_datetime(df["Tarih"]).dt.date
+                gunluk_mail = df["Gun"].value_counts().sort_index()
+                st.bar_chart(gunluk_mail, color="#3B82F6")
                 
         with tab2:
             st.markdown("#### AI Destekli İşletme Raporu")
@@ -140,27 +153,28 @@ if mod == "📊 Dashboards":
             
             if "analiz_sonucu" in st.session_state:
                 st.info(st.session_state.analiz_sonucu)
-                st.markdown("---")
-                st.subheader("🚀 Aksiyon Merkezi")
-                col_btn1, col_btn2 = st.columns(2)
-                with col_btn1:
-                    if st.button("✅ Stratejiyi Onayla"):
-                        st.success("Plan operasyon birimine iletildi.")
-                with col_btn2:
-                    if st.button("📢 Kampanya Başlat"):
-                        st.balloons()
-                        st.info("Kampanya tetiklendi.")
         
         with tab3:
-            st.markdown("#### Detaylı Kayıt Çizelgesi")
-            st.dataframe(df, use_container_width=True)
+            st.subheader("🔍 Akıllı Veri Filtreleme")
+            
+            # YENİ: Filtreleme Seçeneği
+            secilenler = st.multiselect(
+                "Görmek istediğiniz kategorileri seçin:",
+                options=df["Kategori"].unique(),
+                default=df["Kategori"].unique()
+            )
+            
+            df_filtreli = df[df["Kategori"].isin(secilenler)]
+            st.dataframe(df_filtreli, use_container_width=True, height=400)
+            
             if st.button("Verileri Yenile"):
                 st.cache_data.clear()
                 st.rerun()
     else:
-        st.error("Veri bağlantısı yok.")
+        st.warning("Henüz yeterli veri yok veya bağlantı kurulamadı.")
 
 else:
+    # --- BURASI SENİN ESKİ SİMÜLATÖRÜN (DOKUNULMADI) ---
     st.title("Müşteri Deneyimi Simülatörü")
     st.caption("Senaryo: Kargo ücreti veya iade süresi değişirse bot markayı nasıl korur?")
     

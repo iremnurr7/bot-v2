@@ -2,43 +2,63 @@ import smtplib
 import time
 import imaplib
 import email
-import gspread  # Google Sheets kütüphanesi
+import gspread
 from oauth2client.service_account import ServiceAccountCredentials
 from email.header import decode_header
 import google.generativeai as genai
 
 # --- AYARLAR ---
-EMAIL_USER = "ikutuk2007@gmail.com"  # Senin bot mailin
-EMAIL_PASS = "ttiz unxi hceq yxum"    # O 16 haneli şifren (Aynı kalsın)
-GOOGLE_API_KEY = "AIzaSyB1C5JDPFbolsCZC4-UBzr0wTgSOc0ykS8" # Gemini şifren (Aynı kalsın)
+EMAIL_USER = "ikutuk2007@gmail.com"
+EMAIL_PASS = "ttiz unxi hceq yxum"
+# Senin API Key'in
+GOOGLE_API_KEY = "AIzaSyCyWw6oiidpu46-Mf7GsTH6W4MZCOw3jEk"
 
 # --- GOOGLE SHEETS BAĞLANTISI ---
-# Robotun pasaportunu tanımlıyoruz
-scope = ['https://spreadsheets.google.com/feeds', 'https://www.googleapis.com/auth/drive']
-creds = ServiceAccountCredentials.from_json_keyfile_name('google-key.json', scope)
-client = gspread.authorize(creds)
+try:
+    scope = ['https://spreadsheets.google.com/feeds', 'https://www.googleapis.com/auth/drive']
+    creds = ServiceAccountCredentials.from_json_keyfile_name('google-key.json', scope)
+    client = gspread.authorize(creds)
+    sheet = client.open_by_url("https://docs.google.com/spreadsheets/d/1kCGPLzlkI--gYtSFXu1fYlgnGLQr127J90xeyY4Xzgg/edit?usp=sharing").sheet1
+    print("✅ Google Sheets'e başarıyla bağlandım!")
+except Exception as e:
+    print(f"❌ Sheets Bağlantı Hatası: {e}")
 
-# Tabloyu açıyoruz (Adı 'IremStoreVeri' olmalı!)
-# Link ile bağlanıyoruz (Daha garantidir)
-sheet = client.open_by_url("https://docs.google.com/spreadsheets/d/1kCGPLzlkI--gYtSFXu1fYlgnGLQr127J90xeyY4Xzgg/edit?usp=sharing").sheet1
-
-print("✅ Google Sheets'e başarıyla bağlandım!")
-
-# Yapay Zeka Ayarı
 genai.configure(api_key=GOOGLE_API_KEY)
 
 def get_ai_response(user_message):
+    # İŞLETME KURALLARI (14 Gün Kuralı)
+    isletme_kurallari = f"""
+    Bugünün Tarihi: {time.strftime("%Y-%m-%d")}
+    KURAL 1: İade süresi satın alımdan itibaren 14 GÜNDÜR. 
+    KURAL 2: Eğer müşteri '20 gün oldu' gibi 14 günü aşan bir süre belirtiyorsa, iadeyi KESİNLİKLE REDDET ve sürenin dolduğunu nazikçe açıkla.
+    KURAL 3: Ambalajı açılmış ürünler iade alınmaz.
+    KURAL 4: 500 TL altı kargo 50 TL'dir.
+    """
+    
     try:
-        model = genai.GenerativeModel('gemini-1.5-flash')
+        # 🚀 HEDEFİ 12'DEN VURAN SATIR:
+        # Senin listende 'gemini-flash-latest' var, onu kullanıyoruz.
+        model = genai.GenerativeModel('models/gemini-flash-latest')
+        
         prompt = f"""
-        Sen bir e-ticaret asistanısın. Müşteri şöyle dedi: "{user_message}"
-        Buna kibar, kısa ve çözüm odaklı bir cevap ver.
-        Cevabın sadece mail içeriği olsun.
+        Sen İremStore profesyonel asistanısın. Kurallarımız:
+        {isletme_kurallari}
+
+        Müşteri Mesajı: "{user_message}"
+        
+        GÖREV:
+        1. Kurallara göre (özellikle 14 gün sınırı) profesyonel bir cevap yaz.
+        2. Kategoriyi seç: IADE, KARGO, SORU, SIKAYET.
+        
+        Format (Sadece bu formatta cevap ver):
+        KATEGORI: [Kategori]
+        CEVAP: [Cevabın]
         """
         response = model.generate_content(prompt)
         return response.text
     except Exception as e:
-        return "Şu an sistemde bakım var, talebinizi aldık."
+        print(f"⚠️ AI Hatası: {e}") 
+        return "KATEGORI: GENEL\nCEVAP: Üzgünüz, şu an sistemde teknik bir sorun var."
 
 def send_mail(to_email, subject, body):
     try:
@@ -53,72 +73,61 @@ def send_mail(to_email, subject, body):
         print(f"Hata: {e}")
 
 def check_mails():
-    mail = imaplib.IMAP4_SSL("imap.gmail.com")
-    mail.login(EMAIL_USER, EMAIL_PASS)
-    mail.select("inbox")
+    try:
+        mail = imaplib.IMAP4_SSL("imap.gmail.com")
+        mail.login(EMAIL_USER, EMAIL_PASS)
+        mail.select("is") 
 
-    # Sadece okunmamış mailleri al
-    status, messages = mail.search(None, 'UNSEEN')
-    mail_ids = messages[0].split()
+        status, messages = mail.search(None, 'UNSEEN')
+        mail_ids = messages[0].split()
+        
+        print(f"🔎 {len(mail_ids)} adet işlenecek mail var.")
 
-    for mail_id in mail_ids:
-        status, msg_data = mail.fetch(mail_id, "(RFC822)")
-        for response_part in msg_data:
-            if isinstance(response_part, tuple):
-                msg = email.message_from_bytes(response_part[1])
-                
-                # Gönderen ve Konu'yu çöz
-                subject, encoding = decode_header(msg["Subject"])[0]
-                if isinstance(subject, bytes):
-                    subject = subject.decode(encoding if encoding else "utf-8")
-                
-                from_ = msg.get("From")
+        for mail_id in mail_ids:
+            status, data = mail.fetch(mail_id, "(RFC822)")
+            msg = email.message_from_bytes(data[0][1])
+            from_ = msg.get("From")
+            subject = decode_header(msg["Subject"])[0][0]
+            if isinstance(subject, bytes): subject = subject.decode()
 
-                # 🛑 KENDİ KENDİNE KONUŞMA ENGELİ 🛑
-                if EMAIL_USER in from_:
-                    print("🛑 Kendi mailimi okudum, cevap vermiyorum.")
-                    continue  # Bu maili atla, sıradakine geç
+            body = ""
+            if msg.is_multipart():
+                for part in msg.walk():
+                    if part.get_content_type() == "text/plain":
+                        body = part.get_payload(decode=True).decode()
+            else:
+                body = msg.get_payload(decode=True).decode()
 
-                # İçeriği al
-                
-                # İçeriği al
-                body = ""
-                if msg.is_multipart():
-                    for part in msg.walk():
-                        if part.get_content_type() == "text/plain":
-                            body = part.get_payload(decode=True).decode()
-                            break
+            print(f"🚀 İşleniyor: {subject}")
+            ai_output = get_ai_response(body)
+            
+            # Terminalde AI'nın cevabını görelim
+            print(f"🤖 AI Ne Dedi:\n{ai_output}") 
+
+            # Parçalama (split) mantığı
+            try:
+                if "CEVAP:" in ai_output.upper():
+                    kategori = ai_output.upper().split("KATEGORI:")[1].split("CEVAP:")[0].strip().replace("*", "")
+                    ai_reply = ai_output.split("CEVAP:")[1].strip()
                 else:
-                    body = msg.get_payload(decode=True).decode()
+                    kategori = "GENEL"
+                    ai_reply = ai_output
+            except:
+                kategori = "GENEL"
+                ai_reply = ai_output
 
-                print(f"📩 Yeni Mail: {subject} - {from_}")
+            # Sheets Kayıt
+            sheet.append_row([time.strftime("%Y-%m-%d %H:%M"), str(from_), str(subject), str(body[:1000]), str(kategori), str(ai_reply)])
+            print(f"💾 '{kategori}' olarak kaydedildi.")
+            
+            send_mail(from_, f"YNT: {subject}", ai_reply)
 
-                # --- FİLTRE KALDIRILDI (Her şeye cevap verecek) ---
-                # Yapay Zeka Cevabı Al
-                ai_reply = get_ai_response(body)
-                
-                # Kategoriyi Basitçe Belirle (Örnek)
-                kategori = "Genel"
-                if "kargo" in body.lower(): kategori = "Kargo"
-                elif "iade" in body.lower(): kategori = "İade"
-
-                # 🚀 GOOGLE SHEETS'E KAYDET 🚀
-                # Tarih, Kimden, Konu, Mesaj, Kategori, Cevap
-                # Mail çok uzunsa keselim (Maksimum 2000 karakter)
-                ozet_govde = body[:2000] 
-                yeni_satir = [time.strftime("%Y-%m-%d %H:%M"), from_, subject, ozet_govde, kategori, ai_reply]
-                sheet.append_row(yeni_satir)
-                print(f"💾 Buluta Kaydedildi!")
-
-                # Cevap Gönder
-                send_mail(from_, f"YNT: {subject}", ai_reply)
+        mail.logout()
+    except Exception as e:
+        print(f"⚠️ Hata: {e}")
 
 # Sonsuz Döngü
-print("🤖 Bot çalışıyor... (Kapatmak için Ctrl+C)")
+print("\n🤖 Bot AKTİF. 'gemini-flash-latest' modeli devrede...")
 while True:
-    try:
-        check_mails()
-        time.sleep(5)
-    except Exception as e:
-        print(f"Bir hata oldu: {e}")
-        time.sleep(5)
+    check_mails()
+    time.sleep(10)
