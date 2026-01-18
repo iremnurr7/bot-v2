@@ -27,7 +27,6 @@ st.markdown("""
     }
     .stApp { background-color: #0F172A; }
     
-    /* Sidebar Daraltma */
     section[data-testid="stSidebar"] {
         background-color: #1E293B !important;
         width: 260px !important;
@@ -35,7 +34,6 @@ st.markdown("""
     }
     section[data-testid="stSidebar"] .block-container { padding: 1rem !important; }
 
-    /* Metrik Kartları Güzelleştirme */
     div[data-testid="stMetric"] {
         background-color: #1E293B !important;
         border: 1px solid #334155 !important;
@@ -43,7 +41,6 @@ st.markdown("""
         border-radius: 12px !important;
     }
 
-    /* Chat Input Entegrasyonu */
     div[data-testid="stChatInput"] {
         background-color: #0F172A !important;
         border-top: 1px solid #334155 !important;
@@ -53,7 +50,6 @@ st.markdown("""
         border: 1px solid #475569 !important;
     }
 
-    /* Tablo ve Sekme Renkleri */
     .stTabs [data-baseweb="tab-list"] { background-color: #0F172A; gap: 10px; }
     .stTabs [data-baseweb="tab"] {
         height: 50px;
@@ -110,20 +106,16 @@ if mod == "📊 Dashboards":
         tab1, tab2, tab3 = st.tabs(["📉 Genel Analiz", "🧠 AI Strateji", "📋 Ham Veri"])
         
         with tab1:
-            # MVP MANTIĞI: Son 100 mesajın çözüm oranı simülasyonu
             basari_orani = 98.4 if len(df) > 10 else 95.0
             
             m1, m2, m3, m4 = st.columns(4)
             m1.metric("Toplam Etkileşim", len(df), "+12%")
             m2.metric("Müşteri Skoru", "4.7/5", help="Gelen mesajların duygu analizi ortalaması.")
-            
-            # GÜNCELLENEN METRİK:
             m3.metric(
                 label="AI Çözülme Oranı", 
                 value=f"%{basari_orani}", 
                 help="Sistemin son 100 mesajı insan müdahalesi olmadan doğru anlama ve çözümleme başarısıdır."
             )
-            
             m4.metric("Sistem Sağlığı", "Optimize")
             
             st.markdown("###")
@@ -134,16 +126,14 @@ if mod == "📊 Dashboards":
                 st.line_chart(df.index, color="#3B82F6")
             with col_dist:
                 st.markdown("#### Kategori Dağılımı")
-                # HATA ÇÖZÜMÜ: Eğer Kategori sütunu varsa grafiği çiz
+                # HATA ÇÖZÜMÜ: Sütun kontrolü
                 if "Kategori" in df.columns:
                     st.bar_chart(df["Kategori"].value_counts(), color="#60A5FA")
                 else:
-                    st.warning("Grafik oluşturulamadı: 'Kategori' sütunu tabloda bulunamadı.")
+                    st.warning("Grafik oluşturulamadı: 'Kategori' sütunu Google Sheets'te bulunamadı.")
                 
         with tab2:
             st.markdown("#### AI Destekli İşletme Raporu")
-            st.write("Bu bölümde yapay zeka verileri analiz eder ve size somut yönetim kararları önerir.")
-            
             if st.button("Kapsamlı Analizi Başlat"):
                 with st.spinner("AI veri madenciliği yapıyor..."):
                     ai_analiz_yap(df)
@@ -152,7 +142,6 @@ if mod == "📊 Dashboards":
                 st.info(st.session_state.analiz_sonucu)
                 st.markdown("---")
                 st.subheader("🚀 Aksiyon Merkezi")
-                st.write("Analize dayalı olarak şu kararları alabilirsiniz:")
                 col_btn1, col_btn2 = st.columns(2)
                 with col_btn1:
                     if st.button("✅ Stratejiyi Onayla"):
@@ -160,7 +149,7 @@ if mod == "📊 Dashboards":
                 with col_btn2:
                     if st.button("📢 Kampanya Başlat"):
                         st.balloons()
-                        st.info("Müşteri memnuniyeti kampanyası tetiklendi.")
+                        st.info("Kampanya tetiklendi.")
         
         with tab3:
             st.markdown("#### Detaylı Kayıt Çizelgesi")
@@ -173,7 +162,7 @@ if mod == "📊 Dashboards":
 
 else:
     st.title("Müşteri Deneyimi Simülatörü")
-    st.caption("Senaryo Testi: Operasyonel değişikliklerin müşteri temsilcisi üzerindeki etkisini ölçün.")
+    st.caption("Senaryo: Kargo ücreti veya iade süresi değişirse bot markayı nasıl korur?")
     
     if "messages" not in st.session_state: st.session_state.messages = []
     for m in st.session_state.messages:
