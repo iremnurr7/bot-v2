@@ -20,18 +20,15 @@ st.set_page_config(page_title="İremStore Master Panel", page_icon="🛍️", la
 def verileri_getir():
     try:
         scope = ['https://spreadsheets.google.com/feeds', 'https://www.googleapis.com/auth/drive']
-        
-        # --- YENİ SİSTEM: KASADAN ANAHTARI OKU ---
-        # Streamlit Secrets'a yapıştırdığın json içeriğini çeker
         key_dict = json.loads(st.secrets["google_anahtari"]["dosya_icerigi"])
         creds = ServiceAccountCredentials.from_json_keyfile_dict(key_dict, scope)
-        # ----------------------------------------
-        
         client = gspread.authorize(creds)
         sheet = client.open_by_url(SHEET_URL).sheet1
         return pd.DataFrame(sheet.get_all_records())
     except Exception as e:
-        # Hatayı merak edersen buraya st.error(e) yazabilirsin
+        # --- BU SATIRI EKLE ---
+        st.error(f"Sistemsel Hata: {e}") 
+        # ----------------------
         return None
 
 # --- YAN MENÜ (MOD SEÇİMİ) ---
