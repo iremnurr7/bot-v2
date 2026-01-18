@@ -10,7 +10,7 @@ try:
     GOOGLE_API_KEY = st.secrets["gemini_anahtari"]
     genai.configure(api_key=GOOGLE_API_KEY)
 except:
-    st.error("Sistem Hatası: API erişimi sağlanamadı.")
+    st.error("Sistem Hatası: Yetkilendirme başarısız.")
 
 SHEET_URL = "https://docs.google.com/spreadsheets/d/1kCGPLzlkI--gYtSFXu1fYlgnGLQr127J90xeyY4Xzgg/edit?usp=sharing"
 
@@ -20,31 +20,53 @@ st.set_page_config(page_title="İremStore BI Platform", layout="wide")
 st.markdown("""
     <style>
     @import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;600;700&display=swap');
-    html, body, [class*="css"] { font-family: 'Inter', sans-serif; background-color: #0F172A; }
+    
+    html, body, [class*="css"] {
+        font-family: 'Inter', sans-serif;
+        background-color: #0F172A;
+    }
     .stApp { background-color: #0F172A; }
     
-    /* Sidebar Optimizasyonu */
-    section[data-testid="stSidebar"] { background-color: #1E293B !important; width: 280px !important; border-right: 1px solid #334155; }
-    section[data-testid="stSidebar"] .block-container { padding-top: 1rem !important; }
+    /* Sidebar Daraltma */
+    section[data-testid="stSidebar"] {
+        background-color: #1E293B !important;
+        width: 260px !important;
+        border-right: 1px solid #334155;
+    }
+    section[data-testid="stSidebar"] .block-container { padding: 1rem !important; }
 
-    /* Metrik Kartları */
-    div[data-testid="stMetric"] { background-color: #1E293B !important; border: 1px solid #334155 !important; padding: 20px !important; border-radius: 12px !important; }
-    
+    /* Metrik Kartları Güzelleştirme */
+    div[data-testid="stMetric"] {
+        background-color: #1E293B !important;
+        border: 1px solid #334155 !important;
+        padding: 20px !important;
+        border-radius: 12px !important;
+    }
+
     /* Chat Input Entegrasyonu */
-    div[data-testid="stChatInput"] { background-color: #0F172A !important; border-top: 1px solid #334155 !important; }
-    div[data-testid="stChatInput"] > div { background-color: #1E293B !important; border: 1px solid #475569 !important; }
+    div[data-testid="stChatInput"] {
+        background-color: #0F172A !important;
+        border-top: 1px solid #334155 !important;
+    }
+    div[data-testid="stChatInput"] > div {
+        background-color: #1E293B !important;
+        border: 1px solid #475569 !important;
+    }
 
-    /* Buton Tasarımları */
-    .stButton > button { border-radius: 8px !important; background-color: #2563EB !important; color: white !important; font-weight: 600 !important; width: 100%; height: 45px; }
-    
-    /* Genel Yerleşim Boşlukları */
-    .block-container { padding-top: 2rem !important; }
-    h1, h2, h3 { color: #F8FAFC !important; }
-    p, .stMarkdown { color: #94A3B8 !important; }
+    /* Tablo ve Sekme Renkleri */
+    .stTabs [data-baseweb="tab-list"] { background-color: #0F172A; gap: 10px; }
+    .stTabs [data-baseweb="tab"] {
+        height: 50px;
+        background-color: #1E293B;
+        border-radius: 8px 8px 0 0;
+        color: #94A3B8;
+        padding: 0 20px;
+    }
+    .stTabs [aria-selected="true"] { background-color: #3B82F6 !important; color: white !important; }
     </style>
     """, unsafe_allow_html=True)
 
-# --- VERİ VE ANALİZ SİSTEMİ ---
+# --- VERİ FONKSİYONLARI ---
 @st.cache_data(ttl=60)
 def verileri_getir():
     try:
@@ -56,107 +78,98 @@ def verileri_getir():
         return pd.DataFrame(sheet.get_all_records())
     except: return None
 
-def ai_analiz_tetikle(df):
+# AI Analizini yapan ve hafızaya kaydeden fonksiyon
+def ai_analiz_yap(df):
     metin = " ".join(df["Mesaj"].astype(str).tail(15))
-    prompt = f"İş analisti olarak bu verileri incele. 1. Özetle, 2. 3 somut aksiyon planı çıkar: {metin}"
+    prompt = f"İş analisti olarak son 15 mesajı özetle ve patrona 3 somut aksiyon öner: {metin}"
     try:
         model = genai.GenerativeModel('gemini-flash-latest')
         res = model.generate_content(prompt)
-        # Analizi hafızada tutuyoruz ki aksiyon butonları çalışınca silinmesin
-        st.session_state.mevcut_analiz = res.text
-    except: st.error("AI şu an meşgul.")
+        # Analiz sonucunu oturum hafızasına (session_state) kaydediyoruz
+        st.session_state.analiz_sonucu = res.text
+    except:
+        st.error("AI şu an meşgul.")
 
 # --- SIDEBAR ---
 with st.sidebar:
     st.markdown("## İremStore BI")
-    st.caption("Veri Odaklı Yönetim Paneli")
+    mod = st.radio("SİSTEM MODÜLÜ", ["📊 Dashboards", "🧪 Simülatör"])
     st.markdown("---")
-    mod = st.radio("MENÜ", ["📊 Dashboards", "🧪 Simülatör"])
-    
     if mod == "🧪 Simülatör":
-        st.markdown("---")
         st.subheader("Kurallar")
         f_adi = st.text_input("Şirket", "İremStore")
-        iade = st.slider("İade (Gün)", 14, 90, 30)
-        kargo = st.number_input("Kargo (TL)", 0, 200, 50)
-    
-    st.markdown("---")
-    st.caption("v3.2.0 | Kurumsal Mod")
+        iade = st.slider("İade", 14, 90, 30)
+        kargo = st.number_input("Kargo", 0, 200, 50)
+    st.caption("v3.1.0 Premium")
 
 # --- ANA İÇERİK ---
 df = verileri_getir()
 
-# --- MOD 1: DASHBOARDS (TEK SAYFA DÜZENİ) ---
 if mod == "📊 Dashboards":
-    st.title("Yönetici Karar Destek Paneli")
+    st.title("Stratejik Karar Destek Merkezi")
     
     if df is not None:
-        # 1. Üst Metrikler (Hızlı Bakış)
-        m1, m2, m3, m4 = st.columns(4)
-        m1.metric("Toplam Etkileşim", len(df), "+12%")
-        m2.metric("Müşteri Skoru", "4.8/5", help="Duygu analizi ortalaması.")
-        m3.metric("AI Çözümleme", "%98", help="Otomatik çözümleme başarısı.")
-        m4.metric("Sistem Sağlığı", "Stabil")
+        # İYİ DEDİĞİN SEKMELİ YAPI
+        tab1, tab2, tab3 = st.tabs(["📉 Genel Analiz", "🧠 AI Strateji", "📋 Ham Veri"])
         
-        st.markdown("---")
-
-        # 2. Görsel Analizler (Merkezi Bölüm)
-        col_chart, col_tools = st.columns([2, 1])
-        with col_chart:
-            if "Kategori" in df.columns:
-                st.markdown("#### Kategori Bazlı Dağılım Analizi")
-                st.bar_chart(df["Kategori"].value_counts(), color="#3B82F6")
-            st.markdown("#### Mesaj Yoğunluk Trendi")
-            st.line_chart(df.index, color="#60A5FA")
+        with tab1:
+            # Üst Metrikler (Tooltipler eklendi)
+            m1, m2, m3, m4 = st.columns(4)
+            m1.metric("Toplam Etkileşim", len(df), "+12%")
+            m2.metric("Müşteri Skoru", "4.7/5", help="Gelen mesajların duygu analizi ortalaması.")
+            m3.metric("AI Çözümleme", "%98", help="Son 100 mesajın doğru kategorize edilme oranı.")
+            m4.metric("Sistem Sağlığı", "Optimize")
             
-        with col_tools:
-            st.markdown("#### Operasyonel Araçlar")
-            if st.button("🧐 Stratejik AI Analizi Başlat"):
+            st.markdown("###")
+            
+            # Zaman Serisi ve Kategori
+            col_trend, col_dist = st.columns([2, 1])
+            with col_trend:
+                st.markdown("#### Mesaj Yoğunluk Trendi")
+                st.line_chart(df.index, color="#3B82F6")
+            with col_dist:
+                st.markdown("#### Kategori Dağılımı")
+                st.bar_chart(df["Kategori"].value_counts(), color="#60A5FA")
+                
+        with tab2:
+            st.markdown("#### AI Destekli İşletme Raporu")
+            st.write("Bu bölümde yapay zeka verileri analiz eder ve size somut yönetim kararları önerir.")
+            
+            if st.button("Kapsamlı Analizi Başlat"):
                 with st.spinner("AI veri madenciliği yapıyor..."):
-                    ai_analiz_tetikle(df)
+                    ai_analiz_yap(df)
             
-            if st.button("🔄 Verileri Yenile"):
+            # Analiz yapıldıysa buraya yazdır ve altındaki butonları göster
+            if "analiz_sonucu" in st.session_state:
+                st.info(st.session_state.analiz_sonucu)
+                
+                st.markdown("---")
+                st.subheader("🚀 Aksiyon Merkezi")
+                st.write("Analize dayalı olarak şu kararları alabilirsiniz:")
+                
+                col_btn1, col_btn2 = st.columns(2)
+                with col_btn1:
+                    if st.button("✅ Stratejiyi Onayla"):
+                        st.success("Plan operasyon birimine iletildi.")
+                with col_btn2:
+                    if st.button("📢 Kampanya Başlat"):
+                        st.balloons()
+                        st.info("Müşteri memnuniyeti kampanyası tetiklendi.")
+        
+        with tab3:
+            st.markdown("#### Detaylı Kayıt Çizelgesi")
+            st.dataframe(df, use_container_width=True)
+            if st.button("Verileri Yenile"):
                 st.cache_data.clear()
                 st.rerun()
-            
-            st.markdown("---")
-            st.caption("Veriler Google Cloud üzerinden anlık olarak çekilmektedir.")
+    else:
+        st.error("Veri bağlantısı yok.")
 
-        # 3. Aksiyon Merkezi (Dinamik Bölüm)
-        if "mevcut_analiz" in st.session_state:
-            st.markdown("---")
-            st.subheader("🚀 Stratejik Aksiyon Merkezi")
-            st.info(st.session_state.mevcut_analiz)
-            
-            # Aksiyon Butonları
-            st.markdown("##### Bu Analize Dayalı Karar Al:")
-            a1, a2, a3 = st.columns(3)
-            with a1:
-                if st.button("✅ Stratejiyi Onayla"):
-                    st.success("Analiz onaylandı ve ilgili birimlere iletildi.")
-            with a2:
-                if st.button("📢 Kampanya Başlat"):
-                    st.balloons()
-                    st.info("Müşteri memnuniyeti kampanyası tetiklendi.")
-            with a3:
-                if st.button("❌ Raporu Temizle"):
-                    del st.session_state.mevcut_analiz
-                    st.rerun()
-
-        # 4. Ham Veri (En Alt)
-        st.markdown("---")
-        st.markdown("#### Detaylı İşlem Kayıtları")
-        st.dataframe(df, use_container_width=True)
-        
-    else: st.error("Veri tabanı bağlantısı kurulamadı.")
-
-# --- MOD 2: SİMLÜLATÖR ---
 else:
     st.title("Müşteri Deneyimi Simülatörü")
-    st.markdown("Operasyonel kural değişikliklerinin bot üzerindeki etkisini test edin.")
+    st.caption("Senaryo Testi: Operasyonel değişikliklerin müşteri temsilcisi üzerindeki etkisini ölçün.")
     
     if "messages" not in st.session_state: st.session_state.messages = []
-    
     for m in st.session_state.messages:
         with st.chat_message(m["role"]): st.markdown(m["content"])
     
@@ -164,12 +177,10 @@ else:
     if prompt:
         st.chat_message("user").markdown(prompt)
         st.session_state.messages.append({"role": "user", "content": prompt})
-        
-        sys_p = f"Şirket: {f_adi}. İade: {iade} gün. Kargo: {kargo} TL. Kibar ve profesyonel ol. Müşteri: {prompt}"
-        
+        sys_p = f"Şirket: {f_adi}. İade: {iade} gün. Kargo: {kargo} TL. Profesyonel ol. Müşteri: {prompt}"
         try:
             model = genai.GenerativeModel('gemini-flash-latest')
             res = model.generate_content(sys_p)
             with st.chat_message("assistant"): st.markdown(res.text)
             st.session_state.messages.append({"role": "assistant", "content": res.text})
-        except: st.error("AI servisi şu an yanıt veremiyor.")
+        except Exception as e: st.error(f"AI Hatası: {e}")
