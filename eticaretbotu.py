@@ -38,54 +38,53 @@ st.markdown("""
     section[data-testid="stSidebar"] { background-color: #1E293B; border-right: 1px solid #334155; }
     div[data-testid="stMetric"] { background-color: #1E293B; border: 1px solid #334155; padding: 20px; border-radius: 15px; text-align: center; }
     div[data-testid="stMetricValue"] { font-size: 2rem !important; color: #3B82F6; }
-    
-    /* Input Fields Design */
     div[data-baseweb="input"] { background-color: #334155 !important; color: white !important; }
     </style>
     """, unsafe_allow_html=True)
 
-# --- FUNCTIONS (GÜNCELLENMİŞ KISIM BURASI) ---
+# --- FUNCTIONS ---
 @st.cache_data(ttl=60)
 def get_data():
     try:
-        sheet = client.open_by_url(SHEET_URL).sheet1
-        # 'get_all_records' yerine 'get_all_values' kullanıyoruz.
-        # Bu sayede başlıkların ne olduğundan bağımsız ham veriyi alıyoruz.
+        # DÜZELTME BURADA: Artık rastgele sayfayı değil, ismi "Mesajlar" olanı arıyoruz.
+        sheet = client.open_by_url(SHEET_URL).worksheet("Mesajlar")
+        
         data = sheet.get_all_values()
         
-        # Veri var mı kontrol et
         if len(data) > 1:
-            # İlk satırı (Türkçe başlıkları) atlıyoruz, sadece veriyi alıyoruz
             df = pd.DataFrame(data[1:]) 
             
-            # Sütun isimlerini manuel olarak İngilizce atıyoruz.
-            # Sıralamanın Google Sheets ile aynı olduğundan emin ol:
-            # 1.Tarih, 2.Kimden, 3.Konu, 4.Mesaj, 5.Kategori, 6.AI_Cevap
+            # Sütunları İngilizceye çevir
             expected_headers = ["Date", "Sender", "Subject", "Message", "Category", "AI_Reply"]
             
-            # Eğer sütun sayısı tutuyorsa (veya fazlaysa) isimleri değiştir
             current_cols = len(df.columns)
             if current_cols >= 6:
-                # İlk 6 sütuna bizim isimleri ver, kalanları olduğu gibi bırak
                 df.columns = expected_headers + list(df.columns[6:])
             else:
-                # Eksik sütun varsa sadece sığanları isimlendir (Hata vermesin diye)
                 df.columns = expected_headers[:current_cols]
                 
             return df
         return pd.DataFrame()
+    except gspread.exceptions.WorksheetNotFound:
+        st.error("HATA: Google Sheets'te 'Mesajlar' adında bir sayfa bulunamadı. Lütfen mail sayfasının adını 'Mesajlar' olarak değiştirin.")
+        return None
     except Exception as e:
         print(f"Data Fetch Error: {e}")
         return None
 
 def ai_analyze(df):
+    # Mesaj sütunu boş veya hatalıysa AI çalışmasın
+    if "Message" not in df.columns or df.empty:
+        st.error("No message data found to analyze.")
+        return
+
     text_data = " ".join(df["Message"].astype(str).tail(15))
     prompt = f"You are a senior business analyst. Review these customer messages: '{text_data}'. Write 3 short, strategic recommendations for the business owner."
     try:
         model = genai.GenerativeModel('gemini-flash-latest')
         res = model.generate_content(prompt)
         st.session_state.analysis_result = res.text
-    except: st.error("AI connection timeout.")
+    except: st.error("AI connection timeout. (Check API Key or Internet)")
 
 # --- SIDEBAR MENU ---
 with st.sidebar:
@@ -118,9 +117,8 @@ if menu_selection == "🏠 Dashboard":
         c1, c2, c3, c4 = st.columns(4)
         total_msg = len(df)
         
-        # Artık 'Category' sütunu garanti var, hata vermez.
         if "Category" in df.columns:
-            returns = len(df[df["Category"] == "IADE"]) # Sheet'te IADE yazıyorsa burası IADE kalmalı
+            returns = len(df[df["Category"] == "IADE"]) 
         else:
             returns = 0
             
@@ -146,10 +144,9 @@ if menu_selection == "🏠 Dashboard":
 # 2. SALES ANALYTICS
 elif menu_selection == "💰 Sales Analytics":
     st.title("💸 Sales Performance (Demo)")
-    # Simülasyon verisi (Random Data)
     sales = pd.DataFrame({
         "Date": pd.date_range("2024-01-01", periods=30), 
-        "Revenue": np.random.randint(200, 1000, 30) # Dolar bazlı
+        "Revenue": np.random.randint(200, 1000, 30) 
     })
     st.line_chart(sales.set_index("Date")["Revenue"], color="#34D399")
     st.caption("Data is simulated for demonstration purposes.")
@@ -174,7 +171,7 @@ elif menu_selection == "📦 Inventory Manager":
                 product_sheet.append_row([p_name, p_stock, p_price, p_desc])
                 st.success(f"✅ {p_name} added to inventory!")
                 st.rerun()
-    except: st.error("Database Error: 'Urunler' worksheet not found.")
+    except: st.error("Database Error: 'Urunler' worksheet not found. Please create a sheet named 'Urunler'.")
 
 # 4. CUSTOMER INSIGHTS
 elif menu_selection == "📊 Customer Insights":
@@ -184,7 +181,8 @@ elif menu_selection == "📊 Customer Insights":
         
         st.markdown("### AI Strategic Advisor")
         if st.button("✨ Generate AI Report"): 
-            ai_analyze(df)
+            with st.spinner("Analyzing messages..."):
+                ai_analyze(df)
         
         if "analysis_result" in st.session_state: 
             st.success("Analysis Complete")
