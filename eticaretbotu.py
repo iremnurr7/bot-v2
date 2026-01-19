@@ -8,6 +8,30 @@ from oauth2client.service_account import ServiceAccountCredentials
 import google.generativeai as genai
 import datetime
 
+# Dil Sözlüğü
+TRANSLATIONS = {
+    "TR": {
+        "title": "Yönetim Paneli",
+        "menu_home": "🏠 Ana Sayfa",
+        "menu_product": "📦 Ürün Yönetimi",
+        "save_btn": "Kaydet",
+        "success": "Başarılı!"
+    },
+    "EN": {
+        "title": "Admin Dashboard",
+        "menu_home": "🏠 Home",
+        "menu_product": "📦 Product Manager",
+        "save_btn": "Save",
+        "success": "Success!"
+    }
+}
+
+# Sidebar'a Dil Seçimi Ekle
+dil_secimi = st.sidebar.selectbox("Language / Dil", ["EN", "TR"])
+
+# Kullanım Örneği
+st.title(TRANSLATIONS[dil_secimi]["title"])
+
 # --- GÜVENLİ YAPILANDIRMA ---
 try:
     # Gemini Anahtarı
@@ -121,3 +145,5 @@ elif menu_secimi == "📊 Müşteri Raporları":
 elif menu_secimi == "⚙️ Ayarlar":
     st.title("Sistem Ayarları")
     st.warning("Bu panel sadece yönetici yetkisiyle düzenlenebilir.")
+
+  
