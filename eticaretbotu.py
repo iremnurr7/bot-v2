@@ -73,7 +73,7 @@ def get_data():
         return pd.DataFrame()
     except: return pd.DataFrame()
 
-# --- FONKSİYON 2: GÜVENLİK AYARLI BOT MOTORU (MAİL ÇEK & CEVAPLA) ---
+# --- FONKSİYON 2: GÜVENLİK AYARLI & SAĞLAM MODELLİ BOT ---
 def fetch_and_reply_emails():
     # Ekrana işlem kutusu açıyoruz
     status_box = st.status("Mail Botu Devrede...", expanded=True) 
@@ -114,8 +114,8 @@ def fetch_and_reply_emails():
             {"category": "HARM_CATEGORY_DANGEROUS_CONTENT", "threshold": "BLOCK_NONE"},
         ]
         
-        # Hızlı model seçimi
-        model = genai.GenerativeModel('gemini-1.5-flash')
+        # GARANTİ ÇALIŞAN MODEL: gemini-pro
+        model = genai.GenerativeModel('gemini-pro')
         count = 0
 
         # Mailleri İşle
@@ -163,7 +163,7 @@ def fetch_and_reply_emails():
                     """
                     
                     try:
-                        # Safety settings eklendi
+                        # Safety settings eklendi ve model gemini-pro yapıldı
                         ai_reply = model.generate_content(prompt, safety_settings=safety_settings).text
                     except Exception as ai_err:
                         status_box.error(f"AI Hatası Detayı: {ai_err}")
@@ -207,7 +207,7 @@ def fetch_and_reply_emails():
             st.rerun()
             
     except Exception as e:
-        status_box.error(f"KRİTİK HATA: {e}")
+        status_box.error(f"GENEL HATA: {e}")
 
 # --- FONKSİYON 3: RAPORLAMA İÇİN AI ANALİZ ---
 def ai_analyze(df):
@@ -218,8 +218,8 @@ def ai_analyze(df):
     text_data = " ".join(df["Message"].astype(str).tail(10))
     prompt = f"Sen uzman bir iş analistisin. Mesajlar: '{text_data}'. 3 kısa stratejik öneri yaz."
     try:
-        # Burayı da güncelledik
-        model = genai.GenerativeModel('gemini-1.5-flash')
+        # Burayı da güncelledik: gemini-pro
+        model = genai.GenerativeModel('gemini-pro')
         res = model.generate_content(prompt)
         st.session_state.analysis_result = res.text
     except Exception as e: 
