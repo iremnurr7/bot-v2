@@ -8,7 +8,7 @@ from oauth2client.service_account import ServiceAccountCredentials
 import google.generativeai as genai
 import datetime
 import imaplib
-import smtplib # Mail atmak için gerekli
+import smtplib 
 import email
 from email.header import decode_header
 from email.mime.text import MIMEText
@@ -53,8 +53,6 @@ st.markdown("""
 @st.cache_data(ttl=60)
 def get_data():
     try:
-        # Sayfa adı ne olursa olsun hata vermemesi için "Mesajlar" diye aratıyoruz
-        # Eğer bulamazsa ilk sayfayı alacak ama doğrusu "Mesajlar" olmasıdır.
         try:
             sheet = client.open_by_url(SHEET_URL).worksheet("Mesajlar")
         except:
@@ -75,21 +73,30 @@ def get_data():
         return pd.DataFrame()
     except: return pd.DataFrame()
 
-# --- FONKSİYON 2: MAİLLERİ ÇEK VE CEVAPLA (SUPER MOTOR) ---
+# --- FONKSİYON 2: MAİLLERİ ÇEK VE CEVAPLA (DEBUG MODU AKTİF) ---
 def fetch_and_reply_emails():
+    # Ekrana işlem kutusu açıyoruz
+    status_box = st.status("Bot İşlem Günlüğü (Log)", expanded=True) 
+    
     try:
         # 1. Gelen Kutusuna Bağlan
+        status_box.write("1. Gmail sunucusuna bağlanılıyor...")
         mail = imaplib.IMAP4_SSL("imap.gmail.com")
         mail.login(EMAIL_USER, EMAIL_PASS)
         mail.select("inbox")
+        status_box.write("✅ Gmail'e giriş başarılı!")
 
         # Sadece OKUNMAMIŞ (UNSEEN) mailleri ara
+        status_box.write("2. Okunmamış (Koyu renkli) mailler aranıyor...")
         status, messages = mail.search(None, 'UNSEEN')
         mail_ids = messages[0].split()
 
         if not mail_ids:
-            st.toast("📭 Yeni okunmamış mail yok.", icon="info")
+            status_box.warning("📭 Hiç yeni (okunmamış) mail bulunamadı. Lütfen maili açmadan koyu renkli bırakıp tekrar dene.")
+            status_box.update(label="İşlem Bitti: Yeni Mail Yok", state="complete")
             return
+
+        status_box.write(f"📢 {len(mail_ids)} adet yeni mail bulundu! İşleniyor...")
 
         sheet = client.open_by_url(SHEET_URL).worksheet("Mesajlar")
         count = 0
@@ -98,37 +105,42 @@ def fetch_and_reply_emails():
         model = genai.GenerativeModel('gemini-pro')
 
         # Mailleri Döngüye Al
-        for i in mail_ids[-3:]: # Her seferinde en fazla 3 mail işlesin (Hız için)
+        for i in mail_ids[-3:]: 
             res, msg = mail.fetch(i, "(RFC822)")
             for response in msg:
                 if isinstance(response, tuple):
-                    msg = email.message_from_bytes(response[1])
+                    msg_content = email.message_from_bytes(response[1])
                     
                     # Konu ve Gönderen
-                    subject, encoding = decode_header(msg["Subject"])[0]
+                    subject, encoding = decode_header(msg_content["Subject"])[0]
                     if isinstance(subject, bytes):
                         subject = subject.decode(encoding if encoding else "utf-8")
-                    sender = msg.get("From")
-                    sender_email = email.utils.parseaddr(sender)[1] # Sadece mail adresini al
+                    
+                    sender = msg_content.get("From")
+                    sender_email = email.utils.parseaddr(sender)[1] 
+                    status_box.write(f"📩 İşlenen Mail: {sender_email} - Konu: {subject}")
                     
                     # İçerik
                     body = ""
-                    if msg.is_multipart():
-                        for part in msg.walk():
+                    if msg_content.is_multipart():
+                        for part in msg_content.walk():
                             if part.get_content_type() == "text/plain":
                                 body = part.get_payload(decode=True).decode()
                                 break
                     else:
-                        body = msg.get_payload(decode=True).decode()
+                        body = msg_content.get_payload(decode=True).decode()
 
                     # --- AI CEVABI OLUŞTUR ---
+                    status_box.write("🤖 AI Cevap yazıyor...")
                     try:
                         prompt = f"Müşteriden gelen mail: '{body}'. Bu maile kibar, profesyonel ve kısa bir cevap yaz. Türkçe olsun."
                         ai_reply = model.generate_content(prompt).text
-                    except:
+                    except Exception as ai_err:
+                        status_box.error(f"AI Hatası: {ai_err}")
                         ai_reply = "Otomatik cevap oluşturulamadı."
 
                     # --- CEVABI MAİL OLARAK GÖNDER (SMTP) ---
+                    status_box.write("📤 Cevap gönderiliyor...")
                     try:
                         server = smtplib.SMTP_SSL('smtp.gmail.com', 465)
                         server.login(EMAIL_USER, EMAIL_PASS)
@@ -140,9 +152,9 @@ def fetch_and_reply_emails():
                         
                         server.sendmail(EMAIL_USER, sender_email, reply_msg.as_string())
                         server.quit()
-                        status_note = "✅ Cevaplandı"
+                        status_box.write("✅ Mail başarıyla gönderildi!")
                     except Exception as e:
-                        status_note = f"❌ Mail Atılamadı: {e}"
+                        status_box.error(f"❌ Mail Atılamadı: {e}")
 
                     # --- VERİTABANINA KAYDET ---
                     date_now = datetime.datetime.now().strftime("%Y-%m-%d %H:%M")
@@ -153,21 +165,21 @@ def fetch_and_reply_emails():
         mail.logout()
         
         if count > 0:
-            st.success(f"🚀 {count} mail okundu, AI cevabı yazıldı ve gönderildi!")
+            status_box.update(label=f"🚀 {count} işlem başarıyla tamamlandı!", state="complete")
+            st.success(f"🚀 {count} mail yanıtlandı ve kaydedildi!")
             st.cache_data.clear()
             st.rerun()
             
     except Exception as e:
-        st.error(f"İşlem Hatası: {e}")
+        status_box.error(f"KRİTİK HATA: {e}")
 
-# --- FONKSİYON 3: RAPORLAMA İÇİN AI ANALİZ (GEMINI PRO) ---
+# --- FONKSİYON 3: RAPORLAMA İÇİN AI ANALİZ ---
 def ai_analyze(df):
     if "Message" not in df.columns or df.empty:
         st.error("Analiz edilecek mesaj bulunamadı.")
         return
 
     text_data = " ".join(df["Message"].astype(str).tail(10))
-    # DÜZELTİLDİ: Artık 'gemini-pro' kullanıyor (Hata vermez)
     prompt = f"Sen uzman bir iş analistisin. Mesajlar: '{text_data}'. 3 kısa stratejik öneri yaz."
     
     try:
@@ -185,8 +197,8 @@ with st.sidebar:
     
     # GÜNCELLENMİŞ BUTON
     if st.button("📥 Mailleri Çek & Yanıtla", type="primary"):
-        with st.spinner("Bot çalışıyor: Okuyor, Yazıyor, Gönderiyor..."):
-            fetch_and_reply_emails()
+        # Artık spinner'a gerek yok, status_box her şeyi gösterecek
+        fetch_and_reply_emails()
     
     st.markdown("---")
     
