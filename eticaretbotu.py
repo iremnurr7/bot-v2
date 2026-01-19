@@ -15,14 +15,12 @@ import json
 # --- SAYFA AYARLARI ---
 st.set_page_config(page_title="Nexus Admin", layout="wide", page_icon="🌐")
 
-# --- 1. AYARLARI AL (SECRETS KULLANARAK) ---
+# --- 1. AYARLARI AL ---
 try:
-    # API ve Mail Şifreleri
     GOOGLE_API_KEY = st.secrets["gemini_anahtari"]
     EMAIL_USER = st.secrets["email_user"]
     EMAIL_PASS = st.secrets["email_pass"]
     
-    # Google Sheets Bağlantısı
     scope = ['https://spreadsheets.google.com/feeds', 'https://www.googleapis.com/auth/drive']
     key_dict = json.loads(st.secrets["google_anahtari"]["dosya_icerigi"])
     creds = ServiceAccountCredentials.from_json_keyfile_dict(key_dict, scope)
@@ -35,7 +33,7 @@ except Exception as e:
     st.error(f"⚠️ Ayar Hatası: Secrets dosyanızı kontrol edin. Hata: {e}")
     st.stop()
 
-# --- 2. SENİN ZEKİ AI FONKSİYONUN (AYNEN KORUNDU) ---
+# --- 2. AI FONKSİYONU (GARANTİ MODEL: GEMINI-PRO) ---
 def get_ai_response(user_message):
     isletme_kurallari = f"""
     Bugünün Tarihi: {datetime.datetime.now().strftime("%Y-%m-%d")}
@@ -46,8 +44,9 @@ def get_ai_response(user_message):
     """
     
     try:
-        # Senin kullandığın ve çalışan model
-        model = genai.GenerativeModel('models/gemini-1.5-flash') 
+        # DÜZELTME: 'flash' yerine en kararlı çalışan 'gemini-pro' modelini kullanıyoruz.
+        # Bu model her sürümde çalışır, 'Not Supported' hatası vermez.
+        model = genai.GenerativeModel('gemini-pro') 
         
         prompt = f"""
         Sen İremStore profesyonel asistanısın. Kurallarımız:
@@ -66,9 +65,10 @@ def get_ai_response(user_message):
         response = model.generate_content(prompt)
         return response.text
     except Exception as e:
-        return f"KATEGORI: GENEL\nCEVAP: Sistemsel hata oluştu: {e}"
+        # Hata olursa ekrana yazdıralım ki sebebini görelim
+        return f"KATEGORI: HATA\nCEVAP: AI Bağlantı Hatası: {str(e)}"
 
-# --- 3. MAİL GÖNDERME FONKSİYONU ---
+# --- 3. MAİL GÖNDERME ---
 def send_mail_reply(to_email, subject, body):
     try:
         server = smtplib.SMTP("smtp.gmail.com", 587)
@@ -85,17 +85,15 @@ def send_mail_reply(to_email, subject, body):
         st.error(f"Mail Gönderme Hatası: {e}")
         return False
 
-# --- 4. ANA İŞLEM FONKSİYONU (DÖNGÜSÜZ) ---
+# --- 4. ANA İŞLEM ---
 def process_emails():
     status_box = st.status("Mail Botu Çalışıyor...", expanded=True)
     
     try:
-        # Gmail'e Bağlan
         status_box.write("🔌 Gmail'e bağlanılıyor...")
         mail = imaplib.IMAP4_SSL("imap.gmail.com")
         mail.login(EMAIL_USER, EMAIL_PASS)
         
-        # 'is' Etiketini Seç
         try:
             mail.select("is")
             status_box.write("✅ 'is' klasörü bulundu.")
@@ -103,7 +101,6 @@ def process_emails():
             status_box.error("❌ 'is' etiketi bulunamadı!")
             return
 
-        # Okunmamışları Bul
         status, messages = mail.search(None, 'UNSEEN')
         mail_ids = messages[0].split()
 
@@ -114,7 +111,6 @@ def process_emails():
 
         status_box.write(f"📢 {len(mail_ids)} adet yeni mail işleniyor...")
         
-        # Google Sheets'i Aç
         try:
             sheet = client.open_by_url(SHEET_URL).worksheet("Mesajlar")
         except:
@@ -122,13 +118,11 @@ def process_emails():
 
         count = 0
         for i in mail_ids:
-            # Maili Oku
             res, msg_data = mail.fetch(i, "(RFC822)")
             for response_part in msg_data:
                 if isinstance(response_part, tuple):
                     msg = email.message_from_bytes(response_part[1])
                     
-                    # Konu ve Gönderen
                     subject, encoding = decode_header(msg["Subject"])[0]
                     if isinstance(subject, bytes):
                         subject = subject.decode(encoding if encoding else "utf-8")
@@ -136,7 +130,6 @@ def process_emails():
                     sender = msg.get("From")
                     sender_email = email.utils.parseaddr(sender)[1]
                     
-                    # İçerik
                     body = ""
                     if msg.is_multipart():
                         for part in msg.walk():
@@ -148,10 +141,9 @@ def process_emails():
 
                     status_box.write(f"📩 İşleniyor: {subject}")
 
-                    # --- AI ZEKASI BURADA ÇALIŞIYOR ---
+                    # AI ZEKASI
                     ai_full_response = get_ai_response(body)
                     
-                    # Cevabı Parçala (Kategori ve Cevap ayır)
                     kategori = "GENEL"
                     cevap = ai_full_response
                     
@@ -162,11 +154,11 @@ def process_emails():
                         kategori = kategori_part
                         cevap = cevap_part
 
-                    # 1. Sheets'e Kaydet
+                    # Kaydet
                     date_now = datetime.datetime.now().strftime("%Y-%m-%d %H:%M")
                     sheet.append_row([date_now, sender, subject, body, kategori, cevap])
                     
-                    # 2. Mail Gönder
+                    # Gönder
                     if send_mail_reply(sender_email, f"Re: {subject}", cevap):
                         status_box.write(f"✅ Yanıtlandı: {kategori}")
                         count += 1
@@ -176,15 +168,15 @@ def process_emails():
         
         if count > 0:
             status_box.update(label=f"🚀 {count} mail başarıyla yanıtlandı!", state="complete")
-            st.success(f"{count} adet mail işlendi ve veritabanına kaydedildi.")
-            st.cache_data.clear() # Tabloyu yenilemek için
+            st.success(f"{count} adet mail işlendi.")
+            st.cache_data.clear()
             time.sleep(2)
             st.rerun()
 
     except Exception as e:
         status_box.error(f"Hata oluştu: {e}")
 
-# --- ARAYÜZ (GÖRÜNÜM) ---
+# --- ARAYÜZ ---
 st.title("🌐 NEXUS Admin Paneli")
 st.markdown("---")
 
@@ -192,26 +184,19 @@ col1, col2 = st.columns([1, 3])
 
 with col1:
     st.subheader("🤖 Bot Kontrol")
-    st.info("Bot, 'is' etiketli okunmamış mailleri kontrol eder, kurallara göre cevaplar ve veritabanına işler.")
-    
-    # İŞTE O BUTON! (While True yerine buna basacaksın)
     if st.button("📥 Mailleri Kontrol Et ve Yanıtla", type="primary"):
         process_emails()
 
 with col2:
     st.subheader("📊 Mesaj Geçmişi")
-    # Verileri Göster
     try:
         try:
             sheet_read = client.open_by_url(SHEET_URL).worksheet("Mesajlar")
         except:
-            sheet_read = client.open_by_url(SHEET_URL).sheet1
-            
+            sheet_read = client.open_by_url(SHEET_URL).sheet1   
         data = sheet_read.get_all_values()
         if len(data) > 1:
             df = pd.DataFrame(data[1:], columns=["Tarih", "Kimden", "Konu", "Mesaj", "Kategori", "AI Cevabı"])
             st.dataframe(df, use_container_width=True)
-        else:
-            st.info("Henüz hiç mesaj yok.")
     except Exception as e:
         st.error(f"Veri çekme hatası: {e}")
