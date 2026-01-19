@@ -13,7 +13,7 @@ import email
 from email.header import decode_header
 from email.mime.text import MIMEText
 
-# --- SECURE CONFIGURATION ---
+# --- AYARLAR (SECRETS'TAN ÇEKİLİYOR) ---
 try:
     # 1. GEMINI AI
     GOOGLE_API_KEY = st.secrets["gemini_anahtari"]
@@ -34,10 +34,10 @@ except Exception as e:
     st.error(f"Sistem Hatası: Ayarlar eksik. Secrets kısmını kontrol et. Hata: {e}")
     st.stop()
 
-# --- PAGE SETTINGS ---
+# --- SAYFA AYARLARI ---
 st.set_page_config(page_title="Nexus Admin", layout="wide", page_icon="🌐")
 
-# --- CSS DESIGN ---
+# --- CSS TASARIM ---
 st.markdown("""
     <style>
     @import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;500;700&display=swap');
@@ -49,7 +49,7 @@ st.markdown("""
     </style>
     """, unsafe_allow_html=True)
 
-# --- FONKSİYON 1: VERİLERİ GETİR ---
+# --- FONKSİYON 1: VERİLERİ TABLOYA ÇEK ---
 @st.cache_data(ttl=60)
 def get_data():
     try:
@@ -73,39 +73,44 @@ def get_data():
         return pd.DataFrame()
     except: return pd.DataFrame()
 
-# --- FONKSİYON 2: MAİLLERİ ÇEK VE CEVAPLA (DEBUG MODU AKTİF) ---
+# --- FONKSİYON 2: SENİN ÖZEL BOT MOTORUN (MAİL ÇEK & CEVAPLA) ---
 def fetch_and_reply_emails():
-    # Ekrana işlem kutusu açıyoruz
-    status_box = st.status("Bot İşlem Günlüğü (Log)", expanded=True) 
+    # Ekrana işlem kutusu açıyoruz (Print yerine buraya yazacak)
+    status_box = st.status("Mail Botu Devrede...", expanded=True) 
     
     try:
         # 1. Gelen Kutusuna Bağlan
-        status_box.write("1. Gmail sunucusuna bağlanılıyor...")
+        status_box.write("1. Gmail'e bağlanılıyor...")
         mail = imaplib.IMAP4_SSL("imap.gmail.com")
         mail.login(EMAIL_USER, EMAIL_PASS)
-        mail.select("inbox")
-        status_box.write("✅ Gmail'e giriş başarılı!")
+        
+        # --- BURASI SENİN İSTEDİĞİN 'is' ETİKETİ AYARI ---
+        try:
+            mail.select("is") 
+            status_box.write("✅ 'is' etiketli klasöre giriş yapıldı.")
+        except:
+            status_box.error("❌ HATA: Gmail'de 'is' adında bir etiket bulunamadı! Lütfen etiketi kontrol edin.")
+            return
+        # ------------------------------------------------
 
         # Sadece OKUNMAMIŞ (UNSEEN) mailleri ara
-        status_box.write("2. Okunmamış (Koyu renkli) mailler aranıyor...")
         status, messages = mail.search(None, 'UNSEEN')
         mail_ids = messages[0].split()
 
         if not mail_ids:
-            status_box.warning("📭 Hiç yeni (okunmamış) mail bulunamadı. Lütfen maili açmadan koyu renkli bırakıp tekrar dene.")
-            status_box.update(label="İşlem Bitti: Yeni Mail Yok", state="complete")
+            status_box.warning("📭 'is' klasöründe okunmamış yeni mail yok.")
+            status_box.update(label="İşlem Tamamlandı (Yeni Mail Yok)", state="complete")
             return
 
-        status_box.write(f"📢 {len(mail_ids)} adet yeni mail bulundu! İşleniyor...")
+        status_box.write(f"📢 {len(mail_ids)} adet yeni iş maili bulundu! Kurallar uygulanıyor...")
 
         sheet = client.open_by_url(SHEET_URL).worksheet("Mesajlar")
+        # Model olarak gemini-pro kullanıyoruz (flash bazen hata veriyor diye)
+        model = genai.GenerativeModel('gemini-pro')
         count = 0
 
-        # AI Modelini Hazırla
-        model = genai.GenerativeModel('gemini-pro')
-
-        # Mailleri Döngüye Al
-        for i in mail_ids[-3:]: 
+        # Mailleri İşle
+        for i in mail_ids: 
             res, msg = mail.fetch(i, "(RFC822)")
             for response in msg:
                 if isinstance(response, tuple):
@@ -118,7 +123,7 @@ def fetch_and_reply_emails():
                     
                     sender = msg_content.get("From")
                     sender_email = email.utils.parseaddr(sender)[1] 
-                    status_box.write(f"📩 İşlenen Mail: {sender_email} - Konu: {subject}")
+                    status_box.write(f"📩 İşlenen: {subject} ({sender_email})")
                     
                     # İçerik
                     body = ""
@@ -130,35 +135,56 @@ def fetch_and_reply_emails():
                     else:
                         body = msg_content.get_payload(decode=True).decode()
 
-                    # --- AI CEVABI OLUŞTUR ---
-                    status_box.write("🤖 AI Cevap yazıyor...")
+                    # --- SENİN BELİRLEDİĞİN İŞLETME KURALLARI ---
+                    status_box.write("🤖 AI Kurallara Göre Cevaplıyor...")
+                    
+                    bugun = datetime.datetime.now().strftime("%Y-%m-%d")
+                    prompt = f"""
+                    Sen İremStore profesyonel asistanısın. Müşteri mesajı: "{body}"
+                    
+                    KURALLARIMIZ (Buna kesinlikle uy):
+                    - Bugünün Tarihi: {bugun}
+                    1. İade süresi satın alımdan itibaren 14 GÜNDÜR. 
+                    2. Eğer müşteri 14 günü aşan bir süre belirtiyorsa (örn: 20 gün), iadeyi KESİNLİKLE REDDET ve sürenin dolduğunu nazikçe açıkla.
+                    3. Ambalajı açılmış ürünler iade alınmaz.
+                    4. 500 TL altı kargo 50 TL'dir.
+                    
+                    GÖREV:
+                    Bu kurallara göre müşteriye çok kısa, profesyonel ve net bir cevap yaz.
+                    """
+                    
                     try:
-                        prompt = f"Müşteriden gelen mail: '{body}'. Bu maile kibar, profesyonel ve kısa bir cevap yaz. Türkçe olsun."
                         ai_reply = model.generate_content(prompt).text
                     except Exception as ai_err:
                         status_box.error(f"AI Hatası: {ai_err}")
-                        ai_reply = "Otomatik cevap oluşturulamadı."
+                        ai_reply = "Sistem yoğunluğu nedeniyle şu an otomatik cevap verilemedi."
 
                     # --- CEVABI MAİL OLARAK GÖNDER (SMTP) ---
-                    status_box.write("📤 Cevap gönderiliyor...")
+                    status_box.write("📤 Cevap müşteriye gönderiliyor...")
                     try:
-                        server = smtplib.SMTP_SSL('smtp.gmail.com', 465)
+                        server = smtplib.SMTP('smtp.gmail.com', 587) # Senin kodundaki port 587
+                        server.starttls()
                         server.login(EMAIL_USER, EMAIL_PASS)
                         
-                        reply_msg = MIMEText(ai_reply)
-                        reply_msg['Subject'] = f"Re: {subject}"
-                        reply_msg['From'] = EMAIL_USER
-                        reply_msg['To'] = sender_email
+                        # Türkçe karakter sorunu olmasın diye utf-8 kodluyoruz
+                        msg = MIMEText(ai_reply, 'plain', 'utf-8')
+                        msg['Subject'] = f"Re: {subject}"
+                        msg['From'] = EMAIL_USER
+                        msg['To'] = sender_email
                         
-                        server.sendmail(EMAIL_USER, sender_email, reply_msg.as_string())
+                        server.sendmail(EMAIL_USER, sender_email, msg.as_string())
                         server.quit()
-                        status_box.write("✅ Mail başarıyla gönderildi!")
+                        status_box.write("✅ Mail başarıyla iletildi!")
                     except Exception as e:
-                        status_box.error(f"❌ Mail Atılamadı: {e}")
+                        status_box.error(f"❌ Mail Gönderme Hatası: {e}")
 
                     # --- VERİTABANINA KAYDET ---
                     date_now = datetime.datetime.now().strftime("%Y-%m-%d %H:%M")
-                    sheet.append_row([date_now, sender, subject, body, "GENEL", ai_reply])
+                    # Kategori belirleme basitçe
+                    kategori = "GENEL"
+                    if "İADE" in ai_reply.upper() or "IADE" in ai_reply.upper(): kategori = "IADE"
+                    
+                    sheet.append_row([date_now, sender, subject, body, kategori, ai_reply])
                     count += 1
         
         mail.close()
@@ -166,7 +192,7 @@ def fetch_and_reply_emails():
         
         if count > 0:
             status_box.update(label=f"🚀 {count} işlem başarıyla tamamlandı!", state="complete")
-            st.success(f"🚀 {count} mail yanıtlandı ve kaydedildi!")
+            st.success(f"🚀 {count} mail kurallara göre yanıtlandı!")
             st.cache_data.clear()
             st.rerun()
             
@@ -181,7 +207,6 @@ def ai_analyze(df):
 
     text_data = " ".join(df["Message"].astype(str).tail(10))
     prompt = f"Sen uzman bir iş analistisin. Mesajlar: '{text_data}'. 3 kısa stratejik öneri yaz."
-    
     try:
         model = genai.GenerativeModel('gemini-pro')
         res = model.generate_content(prompt)
@@ -189,15 +214,14 @@ def ai_analyze(df):
     except Exception as e: 
         st.error(f"AI Hatası: {e}")
 
-# --- SIDEBAR MENU ---
+# --- SIDEBAR MENÜSÜ ---
 with st.sidebar:
     st.title("🌐 NEXUS")
     st.caption("AI Auto-Reply System")
     st.markdown("---")
     
-    # GÜNCELLENMİŞ BUTON
+    # SENİN İSTEDİĞİN BUTON BURADA
     if st.button("📥 Mailleri Çek & Yanıtla", type="primary"):
-        # Artık spinner'a gerek yok, status_box her şeyi gösterecek
         fetch_and_reply_emails()
     
     st.markdown("---")
@@ -214,7 +238,7 @@ with st.sidebar:
         st.cache_data.clear()
         st.rerun()
 
-# --- PAGES ---
+# --- SAYFALAR ---
 df = get_data()
 
 # 1. DASHBOARD
@@ -242,7 +266,7 @@ if menu_selection == "🏠 Dashboard":
                 fig = px.pie(df_pie, values='Count', names='Category', hole=0.4)
                 st.plotly_chart(fig, use_container_width=True)
         with col2: 
-            st.info("💡 **Insight:** Return requests decreased by 5% this week.")
+            st.info("💡 **Insight:** İade talepleri bu hafta düşüşte.")
 
 # 2. SALES ANALYTICS
 elif menu_selection == "💰 Sales Analytics":
