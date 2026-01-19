@@ -1,21 +1,32 @@
-import google.generativeai as genai
+# --- SİMÜLATÖR (CHATBOT) PARÇASI ---
+# Bunu kullanacağın zaman Sidebar'a inputları, Main kısmına da bu bloğu eklemelisin.
 
-# Senin kodundaki API Key
-GOOGLE_API_KEY = "AIzaSyB1C5JDPFbolsCZC4-UBzr0wTgSOc0ykS8"
-genai.configure(api_key=GOOGLE_API_KEY)
+st.title("Müşteri Deneyimi Simülatörü")
+st.caption("Senaryo Modu")
 
-print("--- 🔍 ERİŞİLEBİLİR MODELLER ARANIYOR ---")
+# Sidebar'a eklenecekler:
+# f_adi = st.sidebar.text_input("Şirket", "İremStore")
+# iade = st.sidebar.slider("İade Süresi", 14, 90, 30)
+# kargo = st.sidebar.number_input("Kargo Limiti", 0, 200, 50)
 
-try:
-    # Google'a "Elimde ne var ne yok göster" diyoruz
-    for m in genai.list_models():
-        # Sadece metin üretebilen (generateContent) modelleri filtrele
-        if 'generateContent' in m.supported_generation_methods:
-            print(f"✅ Bulundu: {m.name}")
-            
-except Exception as e:
-    print(f"❌ HATA: {e}")
-    print("İpucu: Eğer hata 'API Key not valid' ise anahtar yanlıştır.")
-    print("İpucu: Eğer hata 'User location is not supported' ise VPN açman gerekebilir.")
+if "messages" not in st.session_state: st.session_state.messages = []
 
-print("-------------------------------------------")
+for m in st.session_state.messages:
+    with st.chat_message(m["role"]): st.markdown(m["content"])
+
+prompt = st.chat_input("Bir müşteri sorusu yazın...")
+
+if prompt:
+    st.chat_message("user").markdown(prompt)
+    st.session_state.messages.append({"role": "user", "content": prompt})
+    
+    # Prompt Mühendisliği
+    sys_p = f"Şirket: {f_adi}. İade Süresi: {iade} gün. Kargo Limiti: {kargo} TL. Müşteri Sorusu: {prompt}"
+    
+    try:
+        model = genai.GenerativeModel('gemini-flash-latest')
+        res = model.generate_content(sys_p)
+        with st.chat_message("assistant"): st.markdown(res.text)
+        st.session_state.messages.append({"role": "assistant", "content": res.text})
+    except Exception as e: 
+        st.error(f"Hata: {e}")

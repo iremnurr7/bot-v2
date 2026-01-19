@@ -3,6 +3,7 @@ import streamlit as st
 import pandas as pd
 import gspread
 import plotly.express as px
+import numpy as np # Rastgele veri üretmek için
 from oauth2client.service_account import ServiceAccountCredentials
 import google.generativeai as genai
 import datetime
@@ -17,9 +18,9 @@ except:
 SHEET_URL = "https://docs.google.com/spreadsheets/d/1kCGPLzlkI--gYtSFXu1fYlgnGLQr127J90xeyY4Xzgg/edit?usp=sharing"
 
 # --- SAYFA AYARLARI ---
-st.set_page_config(page_title="İremStore Admin", layout="wide", page_icon="📊")
+st.set_page_config(page_title="İremStore Admin", layout="wide", page_icon="🛍️")
 
-# --- ÖZEL CSS (TASARIM) ---
+# --- ÖZEL TASARIM (CSS) ---
 st.markdown("""
     <style>
     @import url('https://fonts.googleapis.com/css2?family=Outfit:wght@300;500;700&display=swap');
@@ -35,30 +36,17 @@ st.markdown("""
         border-right: 1px solid #334155;
     }
     
+    /* Kart Tasarımları */
     div[data-testid="stMetric"] {
         background-color: #1E293B;
         border: 1px solid #334155;
         padding: 20px;
         border-radius: 15px;
-        box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.1);
         text-align: center;
     }
-    
-    div[data-testid="stMetricLabel"] {
-        font-size: 1.1rem !important;
-        color: #94A3B8;
-    }
     div[data-testid="stMetricValue"] {
-        font-size: 2.5rem !important;
-        font-weight: 700;
+        font-size: 2rem !important;
         color: #3B82F6;
-    }
-
-    div[data-testid="stDataFrame"] {
-        background-color: #1E293B;
-        padding: 10px;
-        border-radius: 10px;
-        border: 1px solid #334155;
     }
     </style>
     """, unsafe_allow_html=True)
@@ -81,7 +69,7 @@ def verileri_getir():
 # --- AI ANALİZ ---
 def ai_analiz_yap(df):
     metin = " ".join(df["Mesaj"].astype(str).tail(15))
-    prompt = f"Sen kıdemli bir iş analistisin. Mesajlar: '{metin}'. Şirket sahibi için 3 kısa stratejik öneri yaz."
+    prompt = f"Sen kıdemli bir iş analistisin. Müşteri mesajları: '{metin}'. Şirket sahibi için 3 kısa stratejik öneri yaz."
     try:
         model = genai.GenerativeModel('gemini-flash-latest')
         res = model.generate_content(prompt)
@@ -89,48 +77,39 @@ def ai_analiz_yap(df):
     except:
         st.error("AI bağlantısında gecikme var.")
 
-# --- SIDEBAR (MENÜ) ---
+# --- SIDEBAR ---
 with st.sidebar:
     st.image("https://cdn-icons-png.flaticon.com/512/9187/9187604.png", width=70)
     st.markdown("### İremStore Panel")
     st.markdown("---")
     
-    # MENÜ SEÇİMİNİ BİR DEĞİŞKENE ATIYORUZ
-    menu_secimi = st.radio("MENÜ", ["🏠 Ana Sayfa", "📊 Detaylı Raporlar", "⚙️ Ayarlar"])
+    # GÜNCELLENMİŞ MENÜ (Ürün Yönetimi Eklendi)
+    menu_secimi = st.radio("MENÜ", ["🏠 Ana Sayfa", "💰 Satış Analizi", "📦 Ürün Yönetimi", "📊 Müşteri Raporları", "⚙️ Ayarlar"])
     
     st.markdown("---")
-    st.caption("v2.5.0 Aktif")
-    if st.button("🔄 Verileri Yenile", type="primary"):
+    if st.button("🔄 Verileri Yenile"):
         st.cache_data.clear()
         st.rerun()
 
-# --- ANA EKRAN YÖNLENDİRMESİ ---
-# Burası çok önemli! Seçilen menüye göre ekranı değiştiriyoruz.
-
+# --- SAYFA YÖNLENDİRMELERİ ---
 df = verileri_getir()
 
-# 1. SENARYO: ANA SAYFA SEÇİLİYSE
+# 1. ANA SAYFA (Dashboard)
 if menu_secimi == "🏠 Ana Sayfa":
     st.title("Genel Bakış")
     st.markdown(f"*{datetime.date.today().strftime('%d %B %Y')} durumu.*")
-    st.markdown("---")
-
+    
     if df is not None and not df.empty:
-        # KPI KARTLARI
         col1, col2, col3, col4 = st.columns(4)
         toplam = len(df)
         iade = len(df[df["Kategori"] == "IADE"])
-        red = len(df[df["AI_Cevap"].str.contains("dolmuştur|red|geçmiş", case=False, na=False)])
-        soru = len(df[df["Kategori"] == "SORU"])
         
-        col1.metric("Toplam Mesaj", toplam, "Aktif")
-        col2.metric("İade Talebi", iade, f"%{(iade/toplam)*100:.0f}")
-        col3.metric("Otomatik Red", red, "Bot")
-        col4.metric("Sorular", soru, "Satış")
-
+        col1.metric("Toplam Mesaj", toplam)
+        col2.metric("İade Talebi", iade, f"%{(iade/toplam)*100:.0f} Oran")
+        col3.metric("Günlük Satış (Tahmini)", "₺14,250", "+%12")
+        col4.metric("Aktif Müşteri", "842", "+5")
+        
         st.markdown("###")
-        
-        # GRAFİKLER
         c1, c2 = st.columns(2)
         with c1:
             st.markdown("### 📁 Kategori Dağılımı")
@@ -139,48 +118,107 @@ if menu_secimi == "🏠 Ana Sayfa":
             fig1 = px.pie(df_pie, values='Adet', names='Kategori', hole=0.4, color_discrete_sequence=px.colors.sequential.RdBu)
             st.plotly_chart(fig1, use_container_width=True)
         with c2:
-            st.markdown("### 📅 Günlük Trafik")
-            df["Gun"] = pd.to_datetime(df["Tarih"]).dt.date
-            gunluk = df["Gun"].value_counts().sort_index()
-            st.bar_chart(gunluk, color="#3B82F6")
-    else:
-        st.info("Veri bekleniyor...")
+            st.info("💡 **Günün İpucu:** İade talepleri son 2 günde %5 arttı. Kargo firmasını kontrol etmelisin.")
 
-# 2. SENARYO: DETAYLI RAPORLAR SEÇİLİYSE
-elif menu_secimi == "📊 Detaylı Raporlar":
-    st.title("Veri Merkezi & AI Analiz")
+# 2. SATIŞ ANALİZİ
+elif menu_secimi == "💰 Satış Analizi":
+    st.title("💸 Satış Performansı")
+    st.caption("Veriler pazaryeri entegrasyonundan otomatik çekilmektedir (Simülasyon).")
     st.markdown("---")
+
+    # SİMÜLASYON VERİSİ
+    dates = pd.date_range(start="2024-01-01", periods=30)
+    sales_data = pd.DataFrame({
+        "Tarih": dates,
+        "Ciro": np.random.randint(5000, 25000, size=30),
+        "Siparis": np.random.randint(20, 100, size=30)
+    })
     
-    if df is not None and not df.empty:
-        tab1, tab2 = st.tabs(["📋 Tüm Kayıtlar", "🧠 Yapay Zeka Raporu"])
+    # Üst Kartlar
+    k1, k2, k3 = st.columns(3)
+    k1.metric("Aylık Toplam Ciro", f"₺{sales_data['Ciro'].sum():,}", "+%8.4")
+    k2.metric("Toplam Sipariş", f"{sales_data['Siparis'].sum()}", "-%2.1")
+    k3.metric("Ortalama Sepet Tutarı", "₺345.50", "+₺12.40")
+
+    # Grafikler
+    tab_s1, tab_s2 = st.tabs(["📊 Ciro Trendi", "🏆 En Çok Satanlar"])
+    
+    with tab_s1:
+        st.subheader("Günlük Ciro Grafiği")
+        st.line_chart(sales_data.set_index("Tarih")["Ciro"], color="#34D399")
+    
+    with tab_s2:
+        st.subheader("Top 5 Ürün")
+        urunler = {"Kulaklık": 150, "Mouse": 120, "Klavye": 90, "Laptop Standı": 60, "USB Hub": 45}
+        st.bar_chart(pd.Series(urunler), color="#F472B6")
+
+# 3. ÜRÜN YÖNETİMİ (YENİ EKLENEN KISIM)
+elif menu_secimi == "📦 Ürün Yönetimi":
+    st.title("📦 Ürün ve Stok Yönetimi")
+    st.caption("Botun müşterilere hangi ürünleri satabileceğini buradan yönetirsiniz.")
+    st.markdown("---")
+
+    # A) MEVCUT ÜRÜNLERİ GÖSTER
+    try:
+        scope = ['https://spreadsheets.google.com/feeds', 'https://www.googleapis.com/auth/drive']
+        key_dict = json.loads(st.secrets["google_anahtari"]["dosya_icerigi"])
+        creds = ServiceAccountCredentials.from_json_keyfile_dict(key_dict, scope)
+        client = gspread.authorize(creds)
+        # 'Urunler' sayfasına bağlanıyoruz
+        urun_sheet = client.open_by_url(SHEET_URL).worksheet("Urunler")
+        urunler_df = pd.DataFrame(urun_sheet.get_all_records())
         
-        with tab1:
-            st.markdown("### 🔍 Veri Filtreleme")
-            kategoriler = st.multiselect("Kategori Seç:", df["Kategori"].unique(), default=df["Kategori"].unique())
-            st.dataframe(df[df["Kategori"].isin(kategoriler)], use_container_width=True, height=600)
+        st.subheader("📋 Mevcut Stok Listesi")
+        if not urunler_df.empty:
+            st.dataframe(urunler_df, use_container_width=True)
+        else:
+            st.info("Henüz ürün eklenmemiş.")
             
-        with tab2:
-            st.info("AI, son mesajları okuyup yönetici özeti çıkarır.")
-            if st.button("✨ Raporu Oluştur"):
-                with st.spinner("Analiz yapılıyor..."):
-                    ai_analiz_yap(df)
-            
-            if "analiz_sonucu" in st.session_state:
-                st.success("Analiz Tamamlandı")
-                st.markdown(st.session_state.analiz_sonucu)
+    except Exception as e:
+        st.error(f"Veritabanı hatası (Urunler sayfası yok olabilir): {e}")
 
-# 3. SENARYO: AYARLAR SEÇİLİYSE
-elif menu_secimi == "⚙️ Ayarlar":
-    st.title("Sistem Ayarları")
     st.markdown("---")
-    
-    st.warning("⚠️ Bu alan sadece yönetici erişimine açıktır.")
-    
-    st.text_input("Bot Adı", "İremStore Asistanı", disabled=True)
-    st.slider("İade Kabul Süresi (Gün)", 0, 30, 14, disabled=True)
-    st.toggle("Bakım Modu", False)
-    
-    st.caption("Not: Bu ayarlar demo amaçlıdır, şu an veritabanını etkilemez.")
 
-else:
-    st.error("Bir seçim yapılmadı.")
+    # B) YENİ ÜRÜN EKLEME FORMU
+    st.subheader("➕ Yeni Ürün Ekle")
+    with st.form("urun_ekle_form"):
+        col1, col2 = st.columns(2)
+        with col1:
+            u_adi = st.text_input("Ürün Adı (Örn: iPhone 13)")
+            u_fiyat = st.number_input("Fiyat (TL)", min_value=0)
+        with col2:
+            u_stok = st.number_input("Stok Adedi", min_value=0, step=1)
+            u_aciklama = st.text_input("Kısa Açıklama (Örn: 128GB, Kırmızı)")
+            
+        ekle_btn = st.form_submit_button("💾 Ürünü Kaydet")
+        
+        if ekle_btn:
+            if u_adi and u_fiyat > 0:
+                try:
+                    urun_sheet.append_row([u_adi, u_stok, u_fiyat, u_aciklama])
+                    st.success(f"✅ {u_adi} başarıyla sisteme eklendi! Bot artık bu ürünü tanıyor.")
+                    st.rerun()
+                except Exception as e:
+                    st.error(f"Kayıt hatası: {e}")
+            else:
+                st.warning("Lütfen ürün adı ve fiyatını doğru giriniz.")
+
+# 4. MÜŞTERİ RAPORLARI
+elif menu_secimi == "📊 Müşteri Raporları":
+    st.title("Müşteri İletişim Raporları")
+    if df is not None:
+        tab1, tab2 = st.tabs(["📋 Tüm Mesajlar", "🧠 AI Strateji"])
+        with tab1:
+            st.dataframe(df, use_container_width=True)
+        with tab2:
+            if st.button("✨ Raporu Oluştur"):
+                with st.spinner("AI Çalışıyor..."):
+                    ai_analiz_yap(df)
+            if "analiz_sonucu" in st.session_state:
+                st.info(st.session_state.analiz_sonucu)
+
+# 5. AYARLAR
+elif menu_secimi == "⚙️ Ayarlar":
+    st.title("Ayarlar")
+    st.warning("Demo Modu")
+    st.text_input("Entegrasyon Anahtarı", "TR-8822-KEY", disabled=True)
