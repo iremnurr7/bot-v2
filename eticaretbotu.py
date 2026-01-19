@@ -28,7 +28,6 @@ except Exception as e:
     st.stop()
 
 # --- PAGE SETTINGS ---
-# 'Nexus Admin' olarak değiştirdik.
 st.set_page_config(page_title="Nexus Admin", layout="wide", page_icon="🌐")
 
 # --- CUSTOM CSS DESIGN ---
@@ -45,18 +44,39 @@ st.markdown("""
     </style>
     """, unsafe_allow_html=True)
 
-# --- FUNCTIONS ---
+# --- FUNCTIONS (GÜNCELLENMİŞ KISIM BURASI) ---
 @st.cache_data(ttl=60)
 def get_data():
     try:
         sheet = client.open_by_url(SHEET_URL).sheet1
-        df = pd.DataFrame(sheet.get_all_records())
-        # Sütun başlıklarını da İngilizce bekliyoruz ama veri Türkçe gelebilir.
-        # Kodun çalışması için dataframe sütunlarını standartlaştırıyoruz.
-        if not df.empty and len(df.columns) >= 6:
-            df.columns = ["Date", "Sender", "Subject", "Message", "Category", "AI_Reply"]
-        return df
-    except: return None
+        # 'get_all_records' yerine 'get_all_values' kullanıyoruz.
+        # Bu sayede başlıkların ne olduğundan bağımsız ham veriyi alıyoruz.
+        data = sheet.get_all_values()
+        
+        # Veri var mı kontrol et
+        if len(data) > 1:
+            # İlk satırı (Türkçe başlıkları) atlıyoruz, sadece veriyi alıyoruz
+            df = pd.DataFrame(data[1:]) 
+            
+            # Sütun isimlerini manuel olarak İngilizce atıyoruz.
+            # Sıralamanın Google Sheets ile aynı olduğundan emin ol:
+            # 1.Tarih, 2.Kimden, 3.Konu, 4.Mesaj, 5.Kategori, 6.AI_Cevap
+            expected_headers = ["Date", "Sender", "Subject", "Message", "Category", "AI_Reply"]
+            
+            # Eğer sütun sayısı tutuyorsa (veya fazlaysa) isimleri değiştir
+            current_cols = len(df.columns)
+            if current_cols >= 6:
+                # İlk 6 sütuna bizim isimleri ver, kalanları olduğu gibi bırak
+                df.columns = expected_headers + list(df.columns[6:])
+            else:
+                # Eksik sütun varsa sadece sığanları isimlendir (Hata vermesin diye)
+                df.columns = expected_headers[:current_cols]
+                
+            return df
+        return pd.DataFrame()
+    except Exception as e:
+        print(f"Data Fetch Error: {e}")
+        return None
 
 def ai_analyze(df):
     text_data = " ".join(df["Message"].astype(str).tail(15))
@@ -69,7 +89,6 @@ def ai_analyze(df):
 
 # --- SIDEBAR MENU ---
 with st.sidebar:
-    # Logo yerine emoji veya ikon kullanabilirsin
     st.title("🌐 NEXUS")
     st.caption("E-Commerce OS v1.0")
     st.markdown("---")
@@ -98,8 +117,13 @@ if menu_selection == "🏠 Dashboard":
     if df is not None and not df.empty:
         c1, c2, c3, c4 = st.columns(4)
         total_msg = len(df)
-        returns = len(df[df["Category"] == "IADE"]) # Veritabanında "IADE" yazıyorsa değiştirmene gerek yok
         
+        # Artık 'Category' sütunu garanti var, hata vermez.
+        if "Category" in df.columns:
+            returns = len(df[df["Category"] == "IADE"]) # Sheet'te IADE yazıyorsa burası IADE kalmalı
+        else:
+            returns = 0
+            
         c1.metric("Total Messages", total_msg)
         c2.metric("Return Requests", returns)
         c3.metric("Est. Revenue", "$1,250", "+12%")
@@ -109,10 +133,13 @@ if menu_selection == "🏠 Dashboard":
         col1, col2 = st.columns(2)
         with col1:
             st.subheader("Ticket Categories")
-            df_pie = df["Category"].value_counts().reset_index()
-            df_pie.columns = ["Category", "Count"]
-            fig = px.pie(df_pie, values='Count', names='Category', hole=0.4)
-            st.plotly_chart(fig, use_container_width=True)
+            if "Category" in df.columns:
+                df_pie = df["Category"].value_counts().reset_index()
+                df_pie.columns = ["Category", "Count"]
+                fig = px.pie(df_pie, values='Count', names='Category', hole=0.4)
+                st.plotly_chart(fig, use_container_width=True)
+            else:
+                st.warning("No category data found.")
         with col2: 
             st.info("💡 **Insight:** Return requests decreased by 5% this week. Customer satisfaction is trending up.")
 
@@ -131,7 +158,6 @@ elif menu_selection == "💰 Sales Analytics":
 elif menu_selection == "📦 Inventory Manager":
     st.title("📦 Inventory & Product Management")
     try:
-        # Google Sheet'teki sayfa adını 'Urunler' olarak bırakabilirsin, kod oraya bakar.
         product_sheet = client.open_by_url(SHEET_URL).worksheet("Urunler")
         st.dataframe(pd.DataFrame(product_sheet.get_all_records()), use_container_width=True)
         
@@ -145,7 +171,6 @@ elif menu_selection == "📦 Inventory Manager":
             p_desc = c2.text_input("Short Description")
             
             if st.form_submit_button("Save Product") and p_name:
-                # Veritabanına kaydederken sırayı bozmuyoruz
                 product_sheet.append_row([p_name, p_stock, p_price, p_desc])
                 st.success(f"✅ {p_name} added to inventory!")
                 st.rerun()
