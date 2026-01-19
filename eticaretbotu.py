@@ -8,142 +8,166 @@ from oauth2client.service_account import ServiceAccountCredentials
 import google.generativeai as genai
 import datetime
 
-# Dil Sözlüğü
-TRANSLATIONS = {
-    "TR": {
-        "title": "Yönetim Paneli",
-        "menu_home": "🏠 Ana Sayfa",
-        "menu_product": "📦 Ürün Yönetimi",
-        "save_btn": "Kaydet",
-        "success": "Başarılı!"
-    },
-    "EN": {
-        "title": "Admin Dashboard",
-        "menu_home": "🏠 Home",
-        "menu_product": "📦 Product Manager",
-        "save_btn": "Save",
-        "success": "Success!"
-    }
-}
-
-# Sidebar'a Dil Seçimi Ekle
-dil_secimi = st.sidebar.selectbox("Language / Dil", ["EN", "TR"])
-
-# Kullanım Örneği
-st.title(TRANSLATIONS[dil_secimi]["title"])
-
-# --- GÜVENLİ YAPILANDIRMA ---
+# --- SECURE CONFIGURATION ---
 try:
-    # Gemini Anahtarı
+    # Gemini Key
     GOOGLE_API_KEY = st.secrets["gemini_anahtari"]
     genai.configure(api_key=GOOGLE_API_KEY)
     
-    # Google Sheets Yetkilendirme
+    # Google Sheets Auth
     scope = ['https://spreadsheets.google.com/feeds', 'https://www.googleapis.com/auth/drive']
     key_dict = json.loads(st.secrets["google_anahtari"]["dosya_icerigi"])
     creds = ServiceAccountCredentials.from_json_keyfile_dict(key_dict, scope)
     client = gspread.authorize(creds)
     
-    # --- KRİTİK DEĞİŞİKLİK: URL ARTIK GİZLİ ---
-    # Kodun içinde link yok! Streamlit ayarlarından çekecek.
+    # Sheet URL from Secrets
     SHEET_URL = st.secrets["sheet_url"] 
     
 except Exception as e:
-    st.error(f"Sistem Hatası: Ayarlar okunamadı. Lütfen 'Secrets' ayarlarını kontrol edin. Hata: {e}")
+    st.error(f"System Error: Configuration failed. Please check 'Secrets'. Error: {e}")
     st.stop()
 
-# --- SAYFA AYARLARI ---
-st.set_page_config(page_title="Yönetim Paneli", layout="wide", page_icon="🛍️")
+# --- PAGE SETTINGS ---
+# 'Nexus Admin' olarak değiştirdik.
+st.set_page_config(page_title="Nexus Admin", layout="wide", page_icon="🌐")
 
-# --- CSS TASARIM ---
+# --- CUSTOM CSS DESIGN ---
 st.markdown("""
     <style>
-    @import url('https://fonts.googleapis.com/css2?family=Outfit:wght@300;500;700&display=swap');
-    html, body, [class*="css"] { font-family: 'Outfit', sans-serif; background-color: #0F172A; color: #F8FAFC; }
+    @import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;500;700&display=swap');
+    html, body, [class*="css"] { font-family: 'Inter', sans-serif; background-color: #0F172A; color: #F8FAFC; }
     section[data-testid="stSidebar"] { background-color: #1E293B; border-right: 1px solid #334155; }
     div[data-testid="stMetric"] { background-color: #1E293B; border: 1px solid #334155; padding: 20px; border-radius: 15px; text-align: center; }
     div[data-testid="stMetricValue"] { font-size: 2rem !important; color: #3B82F6; }
+    
+    /* Input Fields Design */
+    div[data-baseweb="input"] { background-color: #334155 !important; color: white !important; }
     </style>
     """, unsafe_allow_html=True)
 
-# --- FONKSİYONLAR ---
+# --- FUNCTIONS ---
 @st.cache_data(ttl=60)
-def verileri_getir():
+def get_data():
     try:
         sheet = client.open_by_url(SHEET_URL).sheet1
         df = pd.DataFrame(sheet.get_all_records())
+        # Sütun başlıklarını da İngilizce bekliyoruz ama veri Türkçe gelebilir.
+        # Kodun çalışması için dataframe sütunlarını standartlaştırıyoruz.
         if not df.empty and len(df.columns) >= 6:
-            df.columns = ["Tarih", "Kimden", "Konu", "Mesaj", "Kategori", "AI_Cevap"]
+            df.columns = ["Date", "Sender", "Subject", "Message", "Category", "AI_Reply"]
         return df
     except: return None
 
-def ai_analiz_yap(df):
-    metin = " ".join(df["Mesaj"].astype(str).tail(15))
-    prompt = f"Sen kıdemli bir iş analistisin. Mesajlar: '{metin}'. Şirket sahibi için 3 kısa stratejik öneri yaz."
+def ai_analyze(df):
+    text_data = " ".join(df["Message"].astype(str).tail(15))
+    prompt = f"You are a senior business analyst. Review these customer messages: '{text_data}'. Write 3 short, strategic recommendations for the business owner."
     try:
         model = genai.GenerativeModel('gemini-flash-latest')
         res = model.generate_content(prompt)
-        st.session_state.analiz_sonucu = res.text
-    except: st.error("AI gecikmesi.")
+        st.session_state.analysis_result = res.text
+    except: st.error("AI connection timeout.")
 
-# --- SIDEBAR ---
+# --- SIDEBAR MENU ---
 with st.sidebar:
-    st.image("https://cdn-icons-png.flaticon.com/512/9187/9187604.png", width=70)
-    st.markdown("### Yönetim Paneli")
+    # Logo yerine emoji veya ikon kullanabilirsin
+    st.title("🌐 NEXUS")
+    st.caption("E-Commerce OS v1.0")
     st.markdown("---")
-    menu_secimi = st.radio("MENÜ", ["🏠 Ana Sayfa", "💰 Satış Analizi", "📦 Ürün Yönetimi", "📊 Müşteri Raporları", "⚙️ Ayarlar"])
+    
+    menu_selection = st.radio("MENU", [
+        "🏠 Dashboard", 
+        "💰 Sales Analytics", 
+        "📦 Inventory Manager", 
+        "📊 Customer Insights", 
+        "⚙️ Settings"
+    ])
+    
     st.markdown("---")
-    if st.button("🔄 Yenile"): st.cache_data.clear(); st.rerun()
+    if st.button("🔄 Refresh Data"): 
+        st.cache_data.clear()
+        st.rerun()
 
-# --- SAYFALAR ---
-df = verileri_getir()
+# --- PAGES ---
+df = get_data()
 
-if menu_secimi == "🏠 Ana Sayfa":
-    st.title("Genel Bakış")
+# 1. DASHBOARD
+if menu_selection == "🏠 Dashboard":
+    st.title("Executive Dashboard")
+    st.markdown(f"*{datetime.date.today().strftime('%B %d, %Y')} - Live Overview*")
+    
     if df is not None and not df.empty:
         c1, c2, c3, c4 = st.columns(4)
-        toplam = len(df)
-        iade = len(df[df["Kategori"] == "IADE"])
-        c1.metric("Toplam Mesaj", toplam); c2.metric("İade", iade)
-        c3.metric("Tahmini Ciro", "₺14,250"); c4.metric("Müşteri", "842")
+        total_msg = len(df)
+        returns = len(df[df["Category"] == "IADE"]) # Veritabanında "IADE" yazıyorsa değiştirmene gerek yok
+        
+        c1.metric("Total Messages", total_msg)
+        c2.metric("Return Requests", returns)
+        c3.metric("Est. Revenue", "$1,250", "+12%")
+        c4.metric("Active Users", "842", "+5")
+        
         st.markdown("###")
         col1, col2 = st.columns(2)
         with col1:
-            df_pie = df["Kategori"].value_counts().reset_index()
-            df_pie.columns = ["Kategori", "Adet"]
-            fig = px.pie(df_pie, values='Adet', names='Kategori', hole=0.4)
+            st.subheader("Ticket Categories")
+            df_pie = df["Category"].value_counts().reset_index()
+            df_pie.columns = ["Category", "Count"]
+            fig = px.pie(df_pie, values='Count', names='Category', hole=0.4)
             st.plotly_chart(fig, use_container_width=True)
-        with col2: st.info("📢 Günlük Özet: İadelerde düşüş var, satışlar stabil.")
+        with col2: 
+            st.info("💡 **Insight:** Return requests decreased by 5% this week. Customer satisfaction is trending up.")
 
-elif menu_secimi == "💰 Satış Analizi":
-    st.title("💸 Satış Performansı (Simülasyon)")
-    sales = pd.DataFrame({"Tarih": pd.date_range("2024-01-01", periods=30), "Ciro": np.random.randint(5000, 25000, 30)})
-    st.line_chart(sales.set_index("Tarih")["Ciro"], color="#34D399")
+# 2. SALES ANALYTICS
+elif menu_selection == "💰 Sales Analytics":
+    st.title("💸 Sales Performance (Demo)")
+    # Simülasyon verisi (Random Data)
+    sales = pd.DataFrame({
+        "Date": pd.date_range("2024-01-01", periods=30), 
+        "Revenue": np.random.randint(200, 1000, 30) # Dolar bazlı
+    })
+    st.line_chart(sales.set_index("Date")["Revenue"], color="#34D399")
+    st.caption("Data is simulated for demonstration purposes.")
 
-elif menu_secimi == "📦 Ürün Yönetimi":
-    st.title("📦 Ürün ve Stok Yönetimi")
+# 3. INVENTORY MANAGER
+elif menu_selection == "📦 Inventory Manager":
+    st.title("📦 Inventory & Product Management")
     try:
-        urun_sheet = client.open_by_url(SHEET_URL).worksheet("Urunler")
-        st.dataframe(pd.DataFrame(urun_sheet.get_all_records()), use_container_width=True)
+        # Google Sheet'teki sayfa adını 'Urunler' olarak bırakabilirsin, kod oraya bakar.
+        product_sheet = client.open_by_url(SHEET_URL).worksheet("Urunler")
+        st.dataframe(pd.DataFrame(product_sheet.get_all_records()), use_container_width=True)
         
-        with st.form("yeni_urun"):
+        st.markdown("---")
+        st.subheader("➕ Add New Product")
+        with st.form("new_product_form"):
             c1, c2 = st.columns(2)
-            u_ad = c1.text_input("Ürün Adı"); u_fiyat = c1.number_input("Fiyat", min_value=0)
-            u_stok = c2.number_input("Stok", min_value=0); u_desc = c2.text_input("Açıklama")
-            if st.form_submit_button("Kaydet") and u_ad:
-                urun_sheet.append_row([u_ad, u_stok, u_fiyat, u_desc])
-                st.success("Kaydedildi!"); st.rerun()
-    except: st.error("Veritabanı hatası: 'Urunler' sayfası bulunamadı.")
+            p_name = c1.text_input("Product Name (e.g. Nike Air Max)")
+            p_price = c1.number_input("Price ($)", min_value=0.0)
+            p_stock = c2.number_input("Stock Qty", min_value=0, step=1)
+            p_desc = c2.text_input("Short Description")
+            
+            if st.form_submit_button("Save Product") and p_name:
+                # Veritabanına kaydederken sırayı bozmuyoruz
+                product_sheet.append_row([p_name, p_stock, p_price, p_desc])
+                st.success(f"✅ {p_name} added to inventory!")
+                st.rerun()
+    except: st.error("Database Error: 'Urunler' worksheet not found.")
 
-elif menu_secimi == "📊 Müşteri Raporları":
-    st.title("Müşteri Raporları")
+# 4. CUSTOMER INSIGHTS
+elif menu_selection == "📊 Customer Insights":
+    st.title("Customer Intelligence")
     if df is not None:
         st.dataframe(df, use_container_width=True)
-        if st.button("AI Analiz Et"): ai_analiz_yap(df)
-        if "analiz_sonucu" in st.session_state: st.info(st.session_state.analiz_sonucu)
+        
+        st.markdown("### AI Strategic Advisor")
+        if st.button("✨ Generate AI Report"): 
+            ai_analyze(df)
+        
+        if "analysis_result" in st.session_state: 
+            st.success("Analysis Complete")
+            st.info(st.session_state.analysis_result)
 
-elif menu_secimi == "⚙️ Ayarlar":
-    st.title("Sistem Ayarları")
-    st.warning("Bu panel sadece yönetici yetkisiyle düzenlenebilir.")
-
-  
+# 5. SETTINGS
+elif menu_selection == "⚙️ Settings":
+    st.title("System Settings")
+    st.warning("⚠️ Restricted Access: Only Administrators can modify these settings.")
+    st.text_input("API Key Status", "Active (Secure)", disabled=True)
+    st.toggle("Maintenance Mode", False)
