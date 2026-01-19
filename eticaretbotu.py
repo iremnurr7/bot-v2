@@ -33,7 +33,7 @@ except Exception as e:
     st.error(f"⚠️ Ayar Hatası: Secrets dosyanızı kontrol edin. Hata: {e}")
     st.stop()
 
-# --- 2. AI FONKSİYONU (GARANTİ MODEL: GEMINI-PRO) ---
+# --- 2. HATA AYIKLAYICI AI FONKSİYONU ---
 def get_ai_response(user_message):
     isletme_kurallari = f"""
     Bugünün Tarihi: {datetime.datetime.now().strftime("%Y-%m-%d")}
@@ -43,30 +43,30 @@ def get_ai_response(user_message):
     KURAL 4: 500 TL altı kargo 50 TL'dir.
     """
     
+    # Mevcut Modelleri Kontrol Et (Diagnostic)
     try:
-        # DÜZELTME: 'flash' yerine en kararlı çalışan 'gemini-pro' modelini kullanıyoruz.
-        # Bu model her sürümde çalışır, 'Not Supported' hatası vermez.
-        model = genai.GenerativeModel('gemini-pro') 
+        # En garanti model ismi budur
+        model = genai.GenerativeModel('gemini-1.5-flash') 
         
         prompt = f"""
         Sen İremStore profesyonel asistanısın. Kurallarımız:
         {isletme_kurallari}
-
         Müşteri Mesajı: "{user_message}"
-        
-        GÖREV:
-        1. Kurallara göre profesyonel cevap yaz.
-        2. Kategoriyi seç: IADE, KARGO, SORU, SIKAYET.
-        
-        Format (Sadece bu formatta cevap ver):
+        GÖREV: Kurallara göre cevap yaz. KATEGORI (IADE, KARGO, SORU, SIKAYET) ve CEVAP formatında dön.
+        Format:
         KATEGORI: [Kategori]
         CEVAP: [Cevabın]
         """
         response = model.generate_content(prompt)
         return response.text
+
     except Exception as e:
-        # Hata olursa ekrana yazdıralım ki sebebini görelim
-        return f"KATEGORI: HATA\nCEVAP: AI Bağlantı Hatası: {str(e)}"
+        # Hata Detayı Yazdır
+        error_msg = str(e)
+        if "404" in error_msg or "not found" in error_msg.lower():
+            return "KATEGORI: SISTEM_HATASI\nCEVAP: Model Bulunamadı. Lütfen 'requirements.txt' dosyasında 'google-generativeai>=0.5.0' yazdığından emin olun."
+        else:
+            return f"KATEGORI: SISTEM_HATASI\nCEVAP: Beklenmedik Hata: {error_msg}"
 
 # --- 3. MAİL GÖNDERME ---
 def send_mail_reply(to_email, subject, body):
@@ -144,40 +144,47 @@ def process_emails():
                     # AI ZEKASI
                     ai_full_response = get_ai_response(body)
                     
-                    kategori = "GENEL"
-                    cevap = ai_full_response
+                    # HATA KONTROLÜ
+                    if "SISTEM_HATASI" in ai_full_response:
+                        status_box.error(ai_full_response)
+                        # Hata varsa işlemi durdurma, kaydet ama mail atma
+                        kategori = "HATA"
+                        cevap = ai_full_response
+                    else:
+                        kategori = "GENEL"
+                        cevap = ai_full_response
+                        if "KATEGORI:" in ai_full_response and "CEVAP:" in ai_full_response:
+                            try:
+                                parts = ai_full_response.split("CEVAP:")
+                                kategori = parts[0].split("KATEGORI:")[1].strip()
+                                cevap = parts[1].strip()
+                            except: pass
+                        
+                        # Mail Gönder (Sadece hata yoksa)
+                        if send_mail_reply(sender_email, f"Re: {subject}", cevap):
+                            status_box.write(f"✅ Yanıtlandı: {kategori}")
                     
-                    if "KATEGORI:" in ai_full_response and "CEVAP:" in ai_full_response:
-                        parts = ai_full_response.split("CEVAP:")
-                        kategori_part = parts[0].split("KATEGORI:")[1].strip()
-                        cevap_part = parts[1].strip()
-                        kategori = kategori_part
-                        cevap = cevap_part
-
                     # Kaydet
                     date_now = datetime.datetime.now().strftime("%Y-%m-%d %H:%M")
                     sheet.append_row([date_now, sender, subject, body, kategori, cevap])
-                    
-                    # Gönder
-                    if send_mail_reply(sender_email, f"Re: {subject}", cevap):
-                        status_box.write(f"✅ Yanıtlandı: {kategori}")
-                        count += 1
+                    count += 1
 
         mail.close()
         mail.logout()
         
         if count > 0:
-            status_box.update(label=f"🚀 {count} mail başarıyla yanıtlandı!", state="complete")
+            status_box.update(label=f"🚀 {count} işlem tamamlandı!", state="complete")
             st.success(f"{count} adet mail işlendi.")
             st.cache_data.clear()
             time.sleep(2)
             st.rerun()
 
     except Exception as e:
-        status_box.error(f"Hata oluştu: {e}")
+        status_box.error(f"Genel Hata: {e}")
 
 # --- ARAYÜZ ---
 st.title("🌐 NEXUS Admin Paneli")
+st.caption("AI Email Bot v2.1 (Diagnostic Mode)")
 st.markdown("---")
 
 col1, col2 = st.columns([1, 3])
@@ -186,6 +193,27 @@ with col1:
     st.subheader("🤖 Bot Kontrol")
     if st.button("📥 Mailleri Kontrol Et ve Yanıtla", type="primary"):
         process_emails()
+    
+    # MODEL KONTROL BUTONU (YENİ)
+    st.markdown("---")
+    if st.button("🛠️ Sistem Modellerini Kontrol Et"):
+        st.write("Sunucuda yüklü modeller aranıyor...")
+        try:
+            available_models = []
+            for m in genai.list_models():
+                if 'generateContent' in m.supported_generation_methods:
+                    available_models.append(m.name)
+            if available_models:
+                st.success("✅ Yüklü Modeller:")
+                st.write(available_models)
+                if "models/gemini-1.5-flash" in available_models or "models/gemini-pro" in available_models:
+                    st.success("Sistem UYUMLU! Kod çalışmalı.")
+                else:
+                    st.error("❌ Hiçbir Gemini modeli bulunamadı. 'requirements.txt' dosyasını kontrol et!")
+            else:
+                st.error("❌ Hiç model bulunamadı. Kütüphane çok eski.")
+        except Exception as e:
+            st.error(f"Kontrol Hatası: {e}. Muhtemelen API Anahtarı hatalı veya Kütüphane çok eski.")
 
 with col2:
     st.subheader("📊 Mesaj Geçmişi")
