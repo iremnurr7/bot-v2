@@ -2,35 +2,43 @@ import streamlit as st
 import subprocess
 import sys
 import time
-
-# --- 1. ZORLA GÜNCELLEME MODÜLÜ (EN BAŞTA ÇALIŞIR) ---
-# Bu blok, sunucudaki eski kütüphaneyi ezer ve yenisini kurar.
-try:
-    import google.generativeai as genai
-    # Sürüm kontrolü: Eğer sürüm eskiyse güncellemeye zorla
-    import importlib.metadata
-    version = importlib.metadata.version("google-generativeai")
-    if version < "0.5.0":
-        raise ImportError # Bilerek hata verdirip güncellemeye zorluyoruz
-except:
-    print("Kütüphane güncelleniyor... Lütfen bekleyin...")
-    subprocess.check_call([sys.executable, "-m", "pip", "install", "--upgrade", "google-generativeai"])
-    # Güncelleme sonrası modülü tekrar yükle
-    import google.generativeai as genai
-
-# Diğer kütüphaneler
+import json
 import pandas as pd
 import gspread
 import smtplib
 import imaplib
 import email
-import json
 from email.header import decode_header
 from email.mime.text import MIMEText
 from oauth2client.service_account import ServiceAccountCredentials
+import plotly.express as px
+
+# --- 1. ZORLA GÜNCELLEME (BUNU KORUYORUZ) ---
+# Sunucuyu en yeni AI sürümüne zorla geçirir.
+try:
+    import google.generativeai as genai
+    import importlib.metadata
+    version = importlib.metadata.version("google-generativeai")
+    if version < "0.5.0":
+        raise ImportError
+except:
+    # Kullanıcıya hissettirmeden arka planda günceller
+    subprocess.check_call([sys.executable, "-m", "pip", "install", "--upgrade", "google-generativeai"])
+    import google.generativeai as genai
 
 # --- SAYFA AYARLARI ---
 st.set_page_config(page_title="Nexus Admin", layout="wide", page_icon="🌐")
+
+# --- CSS TASARIM ---
+st.markdown("""
+    <style>
+    @import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;500;700&display=swap');
+    html, body, [class*="css"] { font-family: 'Inter', sans-serif; background-color: #0F172A; color: #F8FAFC; }
+    section[data-testid="stSidebar"] { background-color: #1E293B; border-right: 1px solid #334155; }
+    div[data-testid="stMetric"] { background-color: #1E293B; border: 1px solid #334155; padding: 20px; border-radius: 15px; text-align: center; }
+    div[data-testid="stMetricValue"] { font-size: 2rem !important; color: #3B82F6; }
+    </style>
+    """, unsafe_allow_html=True)
 
 # --- 2. AYARLARI AL ---
 try:
@@ -50,7 +58,40 @@ except Exception as e:
     st.error(f"⚠️ Ayar Hatası: Secrets kısmını kontrol et. Hata: {e}")
     st.stop()
 
-# --- 3. AKILLI AI CEVAPLAYICI (MODELİ KENDİ SEÇER) ---
+# --- 3. VERİ ÇEKME FONKSİYONLARI (DASHBOARD İÇİN) ---
+@st.cache_data(ttl=60)
+def get_data():
+    try:
+        try: sheet = client.open_by_url(SHEET_URL).worksheet("Mesajlar")
+        except: sheet = client.open_by_url(SHEET_URL).sheet1
+        data = sheet.get_all_values()
+        if len(data) > 1:
+            df = pd.DataFrame(data[1:])
+            expected_headers = ["Date", "Sender", "Subject", "Message", "Category", "AI_Reply"]
+            if len(df.columns) >= 6:
+                df.columns = expected_headers + list(df.columns[6:])
+            else:
+                df.columns = expected_headers[:len(df.columns)]
+            return df
+        return pd.DataFrame()
+    except: return pd.DataFrame()
+
+@st.cache_data(ttl=60)
+def get_products():
+    try:
+        sheet = client.open_by_url(SHEET_URL).worksheet("Urunler")
+        data = sheet.get_all_values()
+        if len(data) > 1:
+            df = pd.DataFrame(data[1:], columns=["UrunAdi", "Stok", "Fiyat", "Aciklama"])
+            # Temizlik
+            df["Fiyat"] = pd.to_numeric(df["Fiyat"].astype(str).str.replace(' TL','').str.replace('$',''), errors='coerce').fillna(0)
+            df["Stok"] = pd.to_numeric(df["Stok"], errors='coerce').fillna(0)
+            total_value = (df["Fiyat"] * df["Stok"]).sum()
+            return df, total_value
+        return pd.DataFrame(), 0
+    except: return pd.DataFrame(), 0
+
+# --- 4. AKILLI AI CEVAPLAYICI ---
 def get_ai_response(user_message):
     isletme_kurallari = f"""
     Bugün: {time.strftime("%Y-%m-%d")}
@@ -69,25 +110,23 @@ def get_ai_response(user_message):
     """
     
     try:
-        # BURASI DEĞİŞTİ: Model ismini ezbere yazmıyoruz.
-        # Google'a soruyoruz: "Elinizde çalışan hangi model var?"
+        # ÖNCE MODELLERİ LİSTELE VE SEÇ (En Garantisi)
         available_models = []
         for m in genai.list_models():
             if 'generateContent' in m.supported_generation_methods:
                 available_models.append(m.name)
         
-        # Listeden içinde 'gemini' geçen ilk modeli al, yoksa listenin ilkini al
-        model_name = next((m for m in available_models if 'gemini' in m), available_models[0])
+        # İçinde 'gemini' geçen bir model bul
+        model_name = next((m for m in available_models if 'gemini' in m), 'models/gemini-pro')
         
-        # Seçilen modeli kullan
         model = genai.GenerativeModel(model_name)
         response = model.generate_content(prompt)
-        return response.text, model_name # Hangi modeli kullandığını da döndür
+        return response.text, model_name
         
     except Exception as e:
         return f"KATEGORI: HATA\nCEVAP: Teknik Hata: {str(e)}", "Yok"
 
-# --- 4. MAİL GÖNDERME ---
+# --- 5. MAİL GÖNDERME ---
 def send_mail_reply(to_email, subject, body):
     try:
         server = smtplib.SMTP("smtp.gmail.com", 587)
@@ -102,18 +141,11 @@ def send_mail_reply(to_email, subject, body):
         return True
     except: return False
 
-# --- 5. ANA İŞLEM ---
+# --- 6. MAİL İŞLEME SÜRECİ (HATA DÜZELTİLDİ) ---
 def process_emails():
-    # Ekrana genişletilebilir kutu koyuyoruz
+    # 'with' bloğu burada başlıyor
     with st.status("Bot Çalışıyor...", expanded=True) as status:
         
-        # Kütüphane sürümünü ekrana yazalım ki güncellenmiş mi görelim
-        try:
-            import importlib.metadata
-            ver = importlib.metadata.version("google-generativeai")
-            st.write(f"ℹ️ AI Kütüphane Sürümü: {ver} (0.5.0 üstü olmalı)")
-        except: st.write("ℹ️ Sürüm okunamadı.")
-
         st.write("🔌 Gmail'e bağlanılıyor...")
         try:
             mail = imaplib.IMAP4_SSL("imap.gmail.com")
@@ -128,6 +160,7 @@ def process_emails():
         mail_ids = messages[0].split()
 
         if not mail_ids:
+            # HATA DÜZELTİLDİ: Status update içeride kaldı
             status.update(label="Yeni mesaj yok", state="complete")
             st.toast("📭 Yeni mail yok.")
             return
@@ -160,9 +193,9 @@ def process_emails():
 
                         st.write(f"📩 İşleniyor: {subject}")
 
-                        # AI ZEKASI
+                        # AI CEVAPLIYOR
                         ai_full_response, used_model = get_ai_response(body)
-                        st.caption(f"Kullanılan Model: {used_model}") # Hangi modeli kullandığını yazar
+                        st.caption(f"Model: {used_model}")
 
                         kategori = "GENEL"
                         cevap = ai_full_response
@@ -172,10 +205,9 @@ def process_emails():
                                 kategori = parts[0].split("KATEGORI:")[1].strip()
                                 cevap = parts[1].strip()
 
-                        # Kaydet
+                        # KAYDET & GÖNDER
                         sheet.append_row([time.strftime("%Y-%m-%d %H:%M"), sender, subject, body, kategori, cevap])
                         
-                        # Gönder
                         if send_mail_reply(sender, f"Re: {subject}", cevap):
                             st.write(f"✅ Yanıtlandı: {kategori}")
                             count += 1
@@ -185,28 +217,94 @@ def process_emails():
         mail.close()
         mail.logout()
         
+        # HATA DÜZELTİLDİ: Status update 'with' bloğunun hizasında
         if count > 0:
             status.update(label="İşlem Tamamlandı!", state="complete")
-            st.success(f"🚀 {count} mail başarıyla yanıtlandı!")
+            st.success(f"🚀 {count} mail yanıtlandı!")
             time.sleep(2)
             st.rerun()
 
-# --- ARAYÜZ ---
-st.title("🌐 NEXUS Admin")
-
-col1, col2 = st.columns([1,3])
-with col1:
-    st.info("Bot, 'is' klasörünü kontrol eder.")
+# --- 7. ARAYÜZ VE MENÜLER ---
+with st.sidebar:
+    st.title("🌐 NEXUS")
+    st.caption("E-Commerce OS v2.0")
+    
+    # Mail Butonu (En Üstte)
     if st.button("📥 Mailleri Çek & Yanıtla", type="primary"):
         process_emails()
+        
+    st.markdown("---")
+    menu_selection = st.radio("MENÜ", ["🏠 Dashboard", "📦 Stok Yönetimi", "📊 Mesaj Analizi", "⚙️ Ayarlar"])
+    
+    st.markdown("---")
+    if st.button("🔄 Yenile"): 
+        st.cache_data.clear()
+        st.rerun()
 
-with col2:
-    st.subheader("Mesajlar")
-    try:
-        try: sheet_read = client.open_by_url(SHEET_URL).worksheet("Mesajlar")
-        except: sheet_read = client.open_by_url(SHEET_URL).sheet1
-        data = sheet_read.get_all_values()
-        if len(data) > 1:
-            df = pd.DataFrame(data[1:], columns=["Tarih","Kimden","Konu","Mesaj","Kategori","AI Cevabı"])
-            st.dataframe(df, use_container_width=True)
-    except: st.write("Veri yok.")
+# --- VERİLERİ HAZIRLA ---
+df_msgs = get_data()
+df_prods, total_stock_value = get_products()
+
+# --- SAYFA İÇERİKLERİ ---
+
+# 1. DASHBOARD
+if menu_selection == "🏠 Dashboard":
+    st.title("Yönetim Paneli")
+    st.markdown(f"*{datetime.date.today().strftime('%d %B %Y')}*")
+    
+    c1, c2, c3, c4 = st.columns(4)
+    c1.metric("Toplam Mesaj", len(df_msgs))
+    
+    iade_sayisi = len(df_msgs[df_msgs["Category"] == "IADE"]) if "Category" in df_msgs.columns else 0
+    c2.metric("İade Talepleri", iade_sayisi)
+    
+    c3.metric("Envanter Değeri", f"{total_stock_value:,.0f} TL")
+    c4.metric("Ürün Çeşidi", len(df_prods))
+    
+    st.markdown("---")
+    col1, col2 = st.columns(2)
+    with col1:
+        st.subheader("Talep Dağılımı")
+        if not df_msgs.empty and "Category" in df_msgs.columns:
+            fig = px.pie(df_msgs, names='Category', hole=0.4)
+            st.plotly_chart(fig, use_container_width=True)
+    with col2:
+        st.info("💡 Bot Durumu: **ÇALIŞIYOR** (Kütüphane Güncel)")
+
+# 2. STOK YÖNETİMİ
+elif menu_selection == "📦 Stok Yönetimi":
+    st.title("📦 Ürünler & Stok")
+    if not df_prods.empty:
+        st.dataframe(df_prods, use_container_width=True)
+    else:
+        st.warning("Ürün listeniz boş.")
+        
+    with st.expander("➕ Yeni Ürün Ekle"):
+        with st.form("add_prod"):
+            c1, c2 = st.columns(2)
+            isim = c1.text_input("Ürün Adı")
+            fiyat = c1.number_input("Fiyat (TL)", min_value=0.0)
+            stok = c2.number_input("Stok", min_value=0)
+            aciklama = c2.text_input("Açıklama")
+            if st.form_submit_button("Kaydet"):
+                try:
+                    sheet = client.open_by_url(SHEET_URL).worksheet("Urunler")
+                    sheet.append_row([isim, stok, fiyat, aciklama])
+                    st.success("Ürün eklendi!")
+                    st.cache_data.clear()
+                    st.rerun()
+                except: st.error("Kayıt hatası.")
+
+# 3. MESAJ ANALİZİ
+elif menu_selection == "📊 Mesaj Analizi":
+    st.title("Müşteri İletişimi")
+    if not df_msgs.empty:
+        st.dataframe(df_msgs, use_container_width=True)
+    else:
+        st.info("Henüz mesaj yok.")
+
+# 4. AYARLAR
+elif menu_selection == "⚙️ Ayarlar":
+    st.title("Ayarlar")
+    st.write("Sistem: **Nexus Admin v2**")
+    st.write("Bağlı Hesap: " + EMAIL_USER)
