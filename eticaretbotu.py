@@ -8,6 +8,7 @@ import gspread
 import smtplib
 import imaplib
 import email
+import datetime  # <-- Eksik olan kütüphane eklendi
 from email.header import decode_header
 from email.mime.text import MIMEText
 from oauth2client.service_account import ServiceAccountCredentials
@@ -58,7 +59,7 @@ except Exception as e:
     st.error(f"⚠️ Ayar Hatası: Secrets kısmını kontrol et. Hata: {e}")
     st.stop()
 
-# --- 3. VERİ ÇEKME FONKSİYONLARI (DASHBOARD İÇİN) ---
+# --- 3. VERİ ÇEKME FONKSİYONLARI ---
 @st.cache_data(ttl=60)
 def get_data():
     try:
@@ -94,7 +95,7 @@ def get_products():
 # --- 4. AKILLI AI CEVAPLAYICI ---
 def get_ai_response(user_message):
     isletme_kurallari = f"""
-    Bugün: {time.strftime("%Y-%m-%d")}
+    Bugün: {datetime.date.today().strftime("%Y-%m-%d")}
     KURAL 1: İade süresi 14 GÜNDÜR. (Geçtiyse reddet).
     KURAL 2: Ambalajı açılmış ürün iade alınmaz.
     KURAL 3: 500 TL altı kargo 50 TL'dir.
@@ -152,6 +153,7 @@ def process_emails():
             mail.login(EMAIL_USER, EMAIL_PASS)
             mail.select("is") # 'is' etiketi
         except Exception as e:
+            # HATA DÜZELTİLDİ: Status update 'with' bloğunun içinde
             status.update(label="Bağlantı Hatası!", state="error")
             st.error(f"Gmail Bağlantı Hatası: {e}. 'is' klasörü var mı?")
             return
@@ -160,7 +162,7 @@ def process_emails():
         mail_ids = messages[0].split()
 
         if not mail_ids:
-            # HATA DÜZELTİLDİ: Status update içeride kaldı
+            # HATA DÜZELTİLDİ: Status update 'with' bloğunun içinde
             status.update(label="Yeni mesaj yok", state="complete")
             st.toast("📭 Yeni mail yok.")
             return
@@ -206,7 +208,7 @@ def process_emails():
                                 cevap = parts[1].strip()
 
                         # KAYDET & GÖNDER
-                        sheet.append_row([time.strftime("%Y-%m-%d %H:%M"), sender, subject, body, kategori, cevap])
+                        sheet.append_row([datetime.datetime.now().strftime("%Y-%m-%d %H:%M"), sender, subject, body, kategori, cevap])
                         
                         if send_mail_reply(sender, f"Re: {subject}", cevap):
                             st.write(f"✅ Yanıtlandı: {kategori}")
@@ -217,7 +219,7 @@ def process_emails():
         mail.close()
         mail.logout()
         
-        # HATA DÜZELTİLDİ: Status update 'with' bloğunun hizasında
+        # HATA DÜZELTİLDİ: Status update artık doğru girintide
         if count > 0:
             status.update(label="İşlem Tamamlandı!", state="complete")
             st.success(f"🚀 {count} mail yanıtlandı!")
@@ -250,6 +252,7 @@ df_prods, total_stock_value = get_products()
 # 1. DASHBOARD
 if menu_selection == "🏠 Dashboard":
     st.title("Yönetim Paneli")
+    # HATA DÜZELTİLDİ: datetime artık import edildiği için çalışacak
     st.markdown(f"*{datetime.date.today().strftime('%d %B %Y')}*")
     
     c1, c2, c3, c4 = st.columns(4)
@@ -261,7 +264,7 @@ if menu_selection == "🏠 Dashboard":
     c3.metric("Envanter Değeri", f"{total_stock_value:,.0f} TL")
     c4.metric("Ürün Çeşidi", len(df_prods))
     
-    st.markdown("---")
+    st.markdown("###")
     col1, col2 = st.columns(2)
     with col1:
         st.subheader("Talep Dağılımı")
@@ -269,7 +272,7 @@ if menu_selection == "🏠 Dashboard":
             fig = px.pie(df_msgs, names='Category', hole=0.4)
             st.plotly_chart(fig, use_container_width=True)
     with col2:
-        st.info("💡 Bot Durumu: **ÇALIŞIYOR** (Kütüphane Güncel)")
+        st.info("💡 Bot Durumu: **ÇALIŞIYOR** (Akıllı Model Seçimi Aktif)")
 
 # 2. STOK YÖNETİMİ
 elif menu_selection == "📦 Stok Yönetimi":
