@@ -73,9 +73,9 @@ def get_data():
         return pd.DataFrame()
     except: return pd.DataFrame()
 
-# --- FONKSİYON 2: SENİN ÖZEL BOT MOTORUN (MAİL ÇEK & CEVAPLA) ---
+# --- FONKSİYON 2: GÜVENLİK AYARLI BOT MOTORU (MAİL ÇEK & CEVAPLA) ---
 def fetch_and_reply_emails():
-    # Ekrana işlem kutusu açıyoruz (Print yerine buraya yazacak)
+    # Ekrana işlem kutusu açıyoruz
     status_box = st.status("Mail Botu Devrede...", expanded=True) 
     
     try:
@@ -84,14 +84,14 @@ def fetch_and_reply_emails():
         mail = imaplib.IMAP4_SSL("imap.gmail.com")
         mail.login(EMAIL_USER, EMAIL_PASS)
         
-        # --- BURASI SENİN İSTEDİĞİN 'is' ETİKETİ AYARI ---
+        # --- 'is' ETİKETİ AYARI ---
         try:
             mail.select("is") 
             status_box.write("✅ 'is' etiketli klasöre giriş yapıldı.")
         except:
             status_box.error("❌ HATA: Gmail'de 'is' adında bir etiket bulunamadı! Lütfen etiketi kontrol edin.")
             return
-        # ------------------------------------------------
+        # ------------------------
 
         # Sadece OKUNMAMIŞ (UNSEEN) mailleri ara
         status, messages = mail.search(None, 'UNSEEN')
@@ -105,8 +105,17 @@ def fetch_and_reply_emails():
         status_box.write(f"📢 {len(mail_ids)} adet yeni iş maili bulundu! Kurallar uygulanıyor...")
 
         sheet = client.open_by_url(SHEET_URL).worksheet("Mesajlar")
-        # Model olarak gemini-pro kullanıyoruz (flash bazen hata veriyor diye)
-        model = genai.GenerativeModel('gemini-pro')
+        
+        # --- AI GÜVENLİK AYARLARI (ENGELLEMEYİ KAPAT) ---
+        safety_settings = [
+            {"category": "HARM_CATEGORY_HARASSMENT", "threshold": "BLOCK_NONE"},
+            {"category": "HARM_CATEGORY_HATE_SPEECH", "threshold": "BLOCK_NONE"},
+            {"category": "HARM_CATEGORY_SEXUALLY_EXPLICIT", "threshold": "BLOCK_NONE"},
+            {"category": "HARM_CATEGORY_DANGEROUS_CONTENT", "threshold": "BLOCK_NONE"},
+        ]
+        
+        # Hızlı model seçimi
+        model = genai.GenerativeModel('gemini-1.5-flash')
         count = 0
 
         # Mailleri İşle
@@ -154,9 +163,10 @@ def fetch_and_reply_emails():
                     """
                     
                     try:
-                        ai_reply = model.generate_content(prompt).text
+                        # Safety settings eklendi
+                        ai_reply = model.generate_content(prompt, safety_settings=safety_settings).text
                     except Exception as ai_err:
-                        status_box.error(f"AI Hatası: {ai_err}")
+                        status_box.error(f"AI Hatası Detayı: {ai_err}")
                         ai_reply = "Sistem yoğunluğu nedeniyle şu an otomatik cevap verilemedi."
 
                     # --- CEVABI MAİL OLARAK GÖNDER (SMTP) ---
@@ -208,7 +218,8 @@ def ai_analyze(df):
     text_data = " ".join(df["Message"].astype(str).tail(10))
     prompt = f"Sen uzman bir iş analistisin. Mesajlar: '{text_data}'. 3 kısa stratejik öneri yaz."
     try:
-        model = genai.GenerativeModel('gemini-pro')
+        # Burayı da güncelledik
+        model = genai.GenerativeModel('gemini-1.5-flash')
         res = model.generate_content(prompt)
         st.session_state.analysis_result = res.text
     except Exception as e: 
