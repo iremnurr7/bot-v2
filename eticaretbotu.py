@@ -13,7 +13,7 @@ import email
 from email.header import decode_header
 from email.mime.text import MIMEText
 
-# --- AYARLAR (SECRETS'TAN ÇEKİLİYOR) ---
+# --- AYARLAR ---
 try:
     # 1. GEMINI AI
     GOOGLE_API_KEY = st.secrets["gemini_anahtari"]
@@ -45,11 +45,35 @@ st.markdown("""
     section[data-testid="stSidebar"] { background-color: #1E293B; border-right: 1px solid #334155; }
     div[data-testid="stMetric"] { background-color: #1E293B; border: 1px solid #334155; padding: 20px; border-radius: 15px; text-align: center; }
     div[data-testid="stMetricValue"] { font-size: 2rem !important; color: #3B82F6; }
-    div[data-baseweb="input"] { background-color: #334155 !important; color: white !important; }
     </style>
     """, unsafe_allow_html=True)
 
-# --- FONKSİYON 1: VERİLERİ TABLOYA ÇEK ---
+# --- YARDIMCI FONKSİYON: GÜVENLİ AI CEVABI ALMA ---
+def get_safe_ai_response(prompt_text):
+    """
+    Bu fonksiyon sırayla tüm modelleri dener. Biri çalışmazsa diğerine geçer.
+    """
+    models_to_try = ['gemini-1.5-flash', 'gemini-pro', 'gemini-1.0-pro']
+    
+    # Güvenlik filtrelerini kapat (Hata almamak için)
+    safety_settings = [
+        {"category": "HARM_CATEGORY_HARASSMENT", "threshold": "BLOCK_NONE"},
+        {"category": "HARM_CATEGORY_HATE_SPEECH", "threshold": "BLOCK_NONE"},
+        {"category": "HARM_CATEGORY_SEXUALLY_EXPLICIT", "threshold": "BLOCK_NONE"},
+        {"category": "HARM_CATEGORY_DANGEROUS_CONTENT", "threshold": "BLOCK_NONE"},
+    ]
+
+    for model_name in models_to_try:
+        try:
+            model = genai.GenerativeModel(model_name)
+            response = model.generate_content(prompt_text, safety_settings=safety_settings)
+            return response.text
+        except Exception:
+            continue # Bu model çalışmadıysa sıradakine geç
+            
+    return "HATA: Hiçbir AI modeli cevap veremedi. API Anahtarınızı veya Kota durumunu kontrol edin."
+
+# --- FONKSİYON 1: VERİLERİ GETİR ---
 @st.cache_data(ttl=60)
 def get_data():
     try:
@@ -62,8 +86,6 @@ def get_data():
         if len(data) > 1:
             df = pd.DataFrame(data[1:]) 
             expected_headers = ["Date", "Sender", "Subject", "Message", "Category", "AI_Reply"]
-            
-            # Sütun eşitleme
             current_cols = len(df.columns)
             if current_cols >= 6:
                 df.columns = expected_headers + list(df.columns[6:])
@@ -73,68 +95,45 @@ def get_data():
         return pd.DataFrame()
     except: return pd.DataFrame()
 
-# --- FONKSİYON 2: GÜVENLİK AYARLI & SAĞLAM MODELLİ BOT ---
+# --- FONKSİYON 2: MAIL BOTU (AKILLI MODEL SEÇİMLİ) ---
 def fetch_and_reply_emails():
-    # Ekrana işlem kutusu açıyoruz
-    status_box = st.status("Mail Botu Devrede...", expanded=True) 
+    status_box = st.status("Mail Botu Başlatılıyor...", expanded=True) 
     
     try:
-        # 1. Gelen Kutusuna Bağlan
         status_box.write("1. Gmail'e bağlanılıyor...")
         mail = imaplib.IMAP4_SSL("imap.gmail.com")
         mail.login(EMAIL_USER, EMAIL_PASS)
         
-        # --- 'is' ETİKETİ AYARI ---
         try:
             mail.select("is") 
-            status_box.write("✅ 'is' etiketli klasöre giriş yapıldı.")
+            status_box.write("✅ 'is' klasörüne girildi.")
         except:
-            status_box.error("❌ HATA: Gmail'de 'is' adında bir etiket bulunamadı! Lütfen etiketi kontrol edin.")
+            status_box.error("❌ HATA: 'is' etiketi bulunamadı.")
             return
-        # ------------------------
 
-        # Sadece OKUNMAMIŞ (UNSEEN) mailleri ara
         status, messages = mail.search(None, 'UNSEEN')
         mail_ids = messages[0].split()
 
         if not mail_ids:
-            status_box.warning("📭 'is' klasöründe okunmamış yeni mail yok.")
-            status_box.update(label="İşlem Tamamlandı (Yeni Mail Yok)", state="complete")
+            status_box.warning("📭 Yeni (okunmamış) mail yok.")
+            status_box.update(label="İşlem Tamamlandı", state="complete")
             return
 
-        status_box.write(f"📢 {len(mail_ids)} adet yeni iş maili bulundu! Kurallar uygulanıyor...")
-
+        status_box.write(f"📢 {len(mail_ids)} yeni mail bulundu.")
         sheet = client.open_by_url(SHEET_URL).worksheet("Mesajlar")
-        
-        # --- AI GÜVENLİK AYARLARI (ENGELLEMEYİ KAPAT) ---
-        safety_settings = [
-            {"category": "HARM_CATEGORY_HARASSMENT", "threshold": "BLOCK_NONE"},
-            {"category": "HARM_CATEGORY_HATE_SPEECH", "threshold": "BLOCK_NONE"},
-            {"category": "HARM_CATEGORY_SEXUALLY_EXPLICIT", "threshold": "BLOCK_NONE"},
-            {"category": "HARM_CATEGORY_DANGEROUS_CONTENT", "threshold": "BLOCK_NONE"},
-        ]
-        
-        # GARANTİ ÇALIŞAN MODEL: gemini-pro
-        model = genai.GenerativeModel('gemini-pro')
         count = 0
 
-        # Mailleri İşle
         for i in mail_ids: 
             res, msg = mail.fetch(i, "(RFC822)")
             for response in msg:
                 if isinstance(response, tuple):
                     msg_content = email.message_from_bytes(response[1])
-                    
-                    # Konu ve Gönderen
                     subject, encoding = decode_header(msg_content["Subject"])[0]
                     if isinstance(subject, bytes):
                         subject = subject.decode(encoding if encoding else "utf-8")
-                    
                     sender = msg_content.get("From")
                     sender_email = email.utils.parseaddr(sender)[1] 
-                    status_box.write(f"📩 İşlenen: {subject} ({sender_email})")
                     
-                    # İçerik
                     body = ""
                     if msg_content.is_multipart():
                         for part in msg_content.walk():
@@ -144,56 +143,35 @@ def fetch_and_reply_emails():
                     else:
                         body = msg_content.get_payload(decode=True).decode()
 
-                    # --- SENİN BELİRLEDİĞİN İŞLETME KURALLARI ---
-                    status_box.write("🤖 AI Kurallara Göre Cevaplıyor...")
-                    
+                    # --- YENİ AI SİSTEMİ ---
+                    status_box.write(f"🤖 AI Cevaplıyor: {subject}")
                     bugun = datetime.datetime.now().strftime("%Y-%m-%d")
                     prompt = f"""
-                    Sen İremStore profesyonel asistanısın. Müşteri mesajı: "{body}"
-                    
-                    KURALLARIMIZ (Buna kesinlikle uy):
-                    - Bugünün Tarihi: {bugun}
-                    1. İade süresi satın alımdan itibaren 14 GÜNDÜR. 
-                    2. Eğer müşteri 14 günü aşan bir süre belirtiyorsa (örn: 20 gün), iadeyi KESİNLİKLE REDDET ve sürenin dolduğunu nazikçe açıkla.
-                    3. Ambalajı açılmış ürünler iade alınmaz.
-                    4. 500 TL altı kargo 50 TL'dir.
-                    
-                    GÖREV:
-                    Bu kurallara göre müşteriye çok kısa, profesyonel ve net bir cevap yaz.
+                    Sen İremStore asistanısın. Müşteri mesajı: "{body}"
+                    KURALLAR: Tarih {bugun}. İade süresi 14 gün. Açılmış paket iade alınmaz. 500TL altı kargo 50TL.
+                    GÖREV: Kurallara göre kısa, nazik bir cevap yaz.
                     """
                     
-                    try:
-                        # Safety settings eklendi ve model gemini-pro yapıldı
-                        ai_reply = model.generate_content(prompt, safety_settings=safety_settings).text
-                    except Exception as ai_err:
-                        status_box.error(f"AI Hatası Detayı: {ai_err}")
-                        ai_reply = "Sistem yoğunluğu nedeniyle şu an otomatik cevap verilemedi."
+                    # Burada hata vermeyen özel fonksiyonumuzu kullanıyoruz
+                    ai_reply = get_safe_ai_response(prompt)
 
-                    # --- CEVABI MAİL OLARAK GÖNDER (SMTP) ---
-                    status_box.write("📤 Cevap müşteriye gönderiliyor...")
+                    # Mail Gönder
                     try:
-                        server = smtplib.SMTP('smtp.gmail.com', 587) # Senin kodundaki port 587
+                        server = smtplib.SMTP('smtp.gmail.com', 587)
                         server.starttls()
                         server.login(EMAIL_USER, EMAIL_PASS)
-                        
-                        # Türkçe karakter sorunu olmasın diye utf-8 kodluyoruz
                         msg = MIMEText(ai_reply, 'plain', 'utf-8')
                         msg['Subject'] = f"Re: {subject}"
                         msg['From'] = EMAIL_USER
                         msg['To'] = sender_email
-                        
                         server.sendmail(EMAIL_USER, sender_email, msg.as_string())
                         server.quit()
-                        status_box.write("✅ Mail başarıyla iletildi!")
                     except Exception as e:
-                        status_box.error(f"❌ Mail Gönderme Hatası: {e}")
+                        status_box.error(f"Mail hatası: {e}")
 
-                    # --- VERİTABANINA KAYDET ---
+                    # Kaydet
                     date_now = datetime.datetime.now().strftime("%Y-%m-%d %H:%M")
-                    # Kategori belirleme basitçe
-                    kategori = "GENEL"
-                    if "İADE" in ai_reply.upper() or "IADE" in ai_reply.upper(): kategori = "IADE"
-                    
+                    kategori = "IADE" if "İADE" in ai_reply.upper() or "IADE" in ai_reply.upper() else "GENEL"
                     sheet.append_row([date_now, sender, subject, body, kategori, ai_reply])
                     count += 1
         
@@ -201,125 +179,90 @@ def fetch_and_reply_emails():
         mail.logout()
         
         if count > 0:
-            status_box.update(label=f"🚀 {count} işlem başarıyla tamamlandı!", state="complete")
-            st.success(f"🚀 {count} mail kurallara göre yanıtlandı!")
+            status_box.update(label=f"🚀 {count} işlem tamamlandı!", state="complete")
+            st.success(f"🚀 {count} mail yanıtlandı!")
             st.cache_data.clear()
             st.rerun()
             
     except Exception as e:
         status_box.error(f"GENEL HATA: {e}")
 
-# --- FONKSİYON 3: RAPORLAMA İÇİN AI ANALİZ ---
+# --- FONKSİYON 3: AI ANALİZ (DÜZELTİLDİ) ---
 def ai_analyze(df):
     if "Message" not in df.columns or df.empty:
         st.error("Analiz edilecek mesaj bulunamadı.")
         return
 
-    text_data = " ".join(df["Message"].astype(str).tail(10))
-    prompt = f"Sen uzman bir iş analistisin. Mesajlar: '{text_data}'. 3 kısa stratejik öneri yaz."
+    # Boş mesajları temizle
+    text_data = " ".join(df["Message"].astype(str).tail(15))
+    
+    if len(text_data) < 5:
+        st.warning("Yeterli veri yok.")
+        return
+
+    prompt = f"Sen iş analistisin. Mesajlar: '{text_data}'. 3 kısa stratejik öneri yaz."
+    
+    # Burada da güvenli fonksiyonu kullanıyoruz
     try:
-        # Burayı da güncelledik: gemini-pro
-        model = genai.GenerativeModel('gemini-pro')
-        res = model.generate_content(prompt)
-        st.session_state.analysis_result = res.text
+        res_text = get_safe_ai_response(prompt)
+        st.session_state.analysis_result = res_text
     except Exception as e: 
         st.error(f"AI Hatası: {e}")
 
-# --- SIDEBAR MENÜSÜ ---
+# --- MENÜ ---
 with st.sidebar:
     st.title("🌐 NEXUS")
-    st.caption("AI Auto-Reply System")
+    st.caption("Auto-Reply System v2")
     st.markdown("---")
     
-    # SENİN İSTEDİĞİN BUTON BURADA
     if st.button("📥 Mailleri Çek & Yanıtla", type="primary"):
         fetch_and_reply_emails()
     
     st.markdown("---")
-    
-    menu_selection = st.radio("MENU", [
-        "🏠 Dashboard", 
-        "💰 Sales Analytics", 
-        "📦 Inventory Manager", 
-        "📊 Customer Insights", 
-        "⚙️ Settings"
-    ])
-    
-    if st.button("🔄 Refresh Data"): 
-        st.cache_data.clear()
-        st.rerun()
+    menu_selection = st.radio("MENU", ["🏠 Dashboard", "💰 Sales Analytics", "📦 Inventory Manager", "📊 Customer Insights", "⚙️ Settings"])
+    if st.button("🔄 Yenile"): st.cache_data.clear(); st.rerun()
 
-# --- SAYFALAR ---
+# --- EKRANLAR ---
 df = get_data()
 
-# 1. DASHBOARD
 if menu_selection == "🏠 Dashboard":
     st.title("Executive Dashboard")
-    st.markdown(f"*{datetime.date.today().strftime('%B %d, %Y')} - Live Overview*")
-    
+    st.markdown(f"*{datetime.date.today().strftime('%B %d, %Y')}*")
     if df is not None and not df.empty:
         c1, c2, c3, c4 = st.columns(4)
-        total_msg = len(df)
-        returns = len(df[df["Category"] == "IADE"]) if "Category" in df.columns else 0
-            
-        c1.metric("Total Messages", total_msg)
-        c2.metric("Return Requests", returns)
-        c3.metric("Est. Revenue", "$1,250", "+12%")
-        c4.metric("Active Users", "842", "+5")
+        c1.metric("Toplam Mesaj", len(df))
+        c2.metric("İadeler", len(df[df["Category"] == "IADE"]) if "Category" in df.columns else 0)
+        c3.metric("Ciro", "$1,250", "+12%")
+        c4.metric("Aktif Üye", "842")
         
-        st.markdown("###")
-        col1, col2 = st.columns(2)
-        with col1:
-            st.subheader("Ticket Categories")
-            if "Category" in df.columns:
-                df_pie = df["Category"].value_counts().reset_index()
-                df_pie.columns = ["Category", "Count"]
-                fig = px.pie(df_pie, values='Count', names='Category', hole=0.4)
-                st.plotly_chart(fig, use_container_width=True)
-        with col2: 
-            st.info("💡 **Insight:** İade talepleri bu hafta düşüşte.")
-
-# 2. SALES ANALYTICS
 elif menu_selection == "💰 Sales Analytics":
     st.title("💸 Sales Performance")
-    sales = pd.DataFrame({
-        "Date": pd.date_range("2024-01-01", periods=30), 
-        "Revenue": np.random.randint(200, 1000, 30) 
-    })
-    st.line_chart(sales.set_index("Date")["Revenue"], color="#34D399")
+    st.line_chart(pd.DataFrame({"Date": pd.date_range("2024-01-01", periods=30), "Rev": np.random.randint(200,1000,30)}).set_index("Date"))
 
-# 3. INVENTORY MANAGER
 elif menu_selection == "📦 Inventory Manager":
-    st.title("📦 Inventory & Product Management")
+    st.title("📦 Inventory")
     try:
         product_sheet = client.open_by_url(SHEET_URL).worksheet("Urunler")
         st.dataframe(pd.DataFrame(product_sheet.get_all_records()), use_container_width=True)
-        
-        with st.form("new_product_form"):
+        with st.form("new"):
             c1, c2 = st.columns(2)
-            p_name = c1.text_input("Product Name")
-            p_price = c1.number_input("Price ($)", min_value=0.0)
-            p_stock = c2.number_input("Stock", min_value=0, step=1)
-            p_desc = c2.text_input("Desc")
-            if st.form_submit_button("Save"):
-                product_sheet.append_row([p_name, p_stock, p_price, p_desc])
-                st.success("Saved!"); st.rerun()
-    except: st.error("Lütfen 'Urunler' sayfasını oluşturun.")
+            isim = c1.text_input("Ürün"); fiyat = c1.number_input("Fiyat")
+            stok = c2.number_input("Stok"); aciklama = c2.text_input("Açıklama")
+            if st.form_submit_button("Kaydet"):
+                product_sheet.append_row([isim, stok, fiyat, aciklama])
+                st.success("Kaydedildi"); st.rerun()
+    except: st.error("'Urunler' sayfası bulunamadı.")
 
-# 4. CUSTOMER INSIGHTS
 elif menu_selection == "📊 Customer Insights":
     st.title("Customer Intelligence")
     if df is not None:
         st.dataframe(df, use_container_width=True)
-        st.markdown("### AI Strategic Advisor")
-        if st.button("✨ Generate AI Report"): 
-            with st.spinner("Analyzing..."):
+        st.markdown("### AI Report")
+        if st.button("✨ Rapor Oluştur"): 
+            with st.spinner("AI Düşünüyor..."):
                 ai_analyze(df)
         if "analysis_result" in st.session_state: 
-            st.success("Analysis Complete")
             st.info(st.session_state.analysis_result)
 
-# 5. SETTINGS
 elif menu_selection == "⚙️ Settings":
-    st.title("System Settings")
-    st.warning("⚠️ Admin Access Only")
+    st.title("Ayarlar"); st.warning("Admin Only")
