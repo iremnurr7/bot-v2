@@ -11,7 +11,7 @@ import google.generativeai as genai
 EMAIL_USER = "ikutuk2007@gmail.com"
 EMAIL_PASS = "ttiz unxi hceq yxum"
 # Senin API Key'in
-GOOGLE_API_KEY = "AIzaSyCyWw6oiidpu46-Mf7GsTH6W4MZCOw3jEk"
+GOOGLE_API_KEY = "-"
 
 # --- GOOGLE SHEETS BAĞLANTISI ---
 try:
