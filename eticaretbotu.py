@@ -58,31 +58,18 @@ except Exception as e:
     st.error(f"⚠️ Configuration Error: Check your secrets. Error: {e}")
     st.stop()
 
-# --- 3. GARANTİ MODEL SEÇİCİ (BRUTE FORCE) ---
-# Bu fonksiyon tek tek tüm isimleri dener. Biri mutlaka çalışır.
-def try_generate_content(prompt):
-    # Denenecek model isimleri sırasıyla:
-    model_candidates = [
-        "gemini-1.5-flash", 
-        "models/gemini-1.5-flash", 
-        "gemini-pro", 
-        "models/gemini-pro",
-        "gemini-1.5-pro"
-    ]
-    
-    last_error = ""
-    
-    for model_name in model_candidates:
-        try:
-            model = genai.GenerativeModel(model_name)
-            response = model.generate_content(prompt)
-            return response.text # Çalışırsa hemen döndür ve çık
-        except Exception as e:
-            last_error = str(e)
-            continue # Çalışmazsa sıradakine geç
-            
-    # Hiçbiri çalışmazsa hata mesajı döndür
-    return f"AI Service Unavailable. Last Error: {last_error}"
+# --- 3. GARANTİ MODEL BULUCU (Dynamic Discovery) ---
+# En güvenli yöntem: Google'a "Elinizdekileri listele" deyip ilk çalışanı almak.
+def get_working_model():
+    try:
+        # Önce sistemdeki tüm modelleri listele
+        for m in genai.list_models():
+            # Eğer model metin üretebiliyorsa (generateContent) onu seç ve döngüyü kır
+            if 'generateContent' in m.supported_generation_methods:
+                return m.name
+        return "models/gemini-pro" # Hiçbir şey bulamazsa son çare
+    except:
+        return "models/gemini-pro"
 
 # --- 4. DYNAMIC RULES ---
 if "bot_rules" not in st.session_state:
@@ -122,7 +109,7 @@ def get_products():
         return pd.DataFrame(), 0
     except: return pd.DataFrame(), 0
 
-# --- 6. STRATEGIC REPORT (Tank Modu) ---
+# --- 6. STRATEGIC REPORT ---
 def generate_strategic_report(df):
     if df.empty: return "No data available."
     messages_text = "\n".join(df["Message"].tail(30).astype(str).tolist())
@@ -135,10 +122,15 @@ def generate_strategic_report(df):
     🚨 **Critical Issue:** [Main problem]
     💡 **Action Plan:** [Recommendations]
     """
-    # Eski tekli deneme yerine, çoklu deneme fonksiyonunu çağırıyoruz:
-    return try_generate_content(prompt)
+    try:
+        # Modeli dinamik buluyoruz
+        model_name = get_working_model()
+        model = genai.GenerativeModel(model_name)
+        response = model.generate_content(prompt)
+        return response.text
+    except Exception as e: return f"Report Error using {model_name}: {str(e)}"
 
-# --- 7. AI RESPONSE (Tank Modu) ---
+# --- 7. AI RESPONSE ---
 def get_ai_response(user_message, custom_rules):
     prompt = f"""
     You are 'Solace', a professional e-commerce assistant.
@@ -151,8 +143,14 @@ def get_ai_response(user_message, custom_rules):
     CATEGORY: [RETURN/SHIPPING/QUESTION/OTHER] 
     ANSWER: [Your reply text]
     """
-    # Burada da garanti fonksiyonu kullanıyoruz
-    return try_generate_content(prompt)
+    try:
+        # Modeli dinamik buluyoruz
+        model_name = get_working_model()
+        model = genai.GenerativeModel(model_name)
+        response = model.generate_content(prompt)
+        return response.text
+    except Exception as e: 
+        return f"CATEGORY: ERROR\nANSWER: AI Error: {str(e)}"
 
 # --- 8. SEND EMAIL ---
 def send_mail_reply(to_email, subject, body):
@@ -169,7 +167,7 @@ def send_mail_reply(to_email, subject, body):
         return True
     except: return False
 
-# --- 9. PROCESS EMAILS (Hatasız) ---
+# --- 9. PROCESS EMAILS ---
 def process_emails():
     with st.spinner("Solace is checking emails..."):
         st.write("🔌 Connecting to Gmail...")
@@ -308,6 +306,13 @@ elif menu_selection == "📊 Analysis":
         st.markdown("### 🧠 Solace AI Report")
         st.caption("AI analyzes incoming messages and provides critical alerts.")
         
+        # DEBUG: Hangi modelin çalıştığını ekrana ufakça yazdırıyorum ki emin olalım
+        try:
+             # Bu sadece kullanıcıya güven vermek için
+             active_model = get_working_model()
+             st.caption(f"Active Engine: `{active_model}`")
+        except: pass
+
         if st.button("✨ Generate Strategic Report", type="primary"):
             if not df_msgs.empty:
                 with st.spinner("Solace is analyzing data..."):
