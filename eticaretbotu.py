@@ -14,16 +14,17 @@ from email.mime.text import MIMEText
 from oauth2client.service_account import ServiceAccountCredentials
 import plotly.express as px
 
-# --- 1. FORCE UPDATE (Libraries) ---
+# --- 1. FORCE UPDATE & RERUN (Kütüphane Güncelleme) ---
+# Bu blok kütüphane eskiyse günceller ve sayfayı yeniler.
 try:
     import google.generativeai as genai
     import importlib.metadata
     version = importlib.metadata.version("google-generativeai")
     if version < "0.5.0":
-        raise ImportError
+        subprocess.check_call([sys.executable, "-m", "pip", "install", "--upgrade", "google-generativeai"])
+        st.rerun() # Güncelleme sonrası sayfayı yenile
 except:
-    subprocess.check_call([sys.executable, "-m", "pip", "install", "--upgrade", "google-generativeai"])
-    import google.generativeai as genai
+    pass
 
 # --- PAGE CONFIG ---
 st.set_page_config(page_title="Solace Admin", layout="wide", page_icon="🌑")
@@ -58,13 +59,34 @@ except Exception as e:
     st.error(f"⚠️ Configuration Error: Check your secrets. Error: {e}")
     st.stop()
 
-# --- 3. DYNAMIC RULES (Default English) ---
+# --- 3. DYNAMIC MODEL SELECTOR (HATA ÇÖZÜCÜ) ---
+# Bu fonksiyon ezbere model ismi kullanmaz, sunucuda ne varsa onu bulur.
+def get_best_model():
+    try:
+        available_models = []
+        for m in genai.list_models():
+            if 'generateContent' in m.supported_generation_methods:
+                available_models.append(m.name)
+        
+        # Öncelik sırası: Flash > Pro > Herhangi bir Gemini
+        if "models/gemini-1.5-flash" in available_models:
+            return "models/gemini-1.5-flash"
+        elif "models/gemini-pro" in available_models:
+            return "models/gemini-pro"
+        elif len(available_models) > 0:
+            return available_models[0] # Ne varsa onu döndür
+        else:
+            return "models/gemini-pro" # Hiçbir şey yoksa varsayılanı dene
+    except:
+        return "models/gemini-pro"
+
+# --- 4. DYNAMIC RULES ---
 if "bot_rules" not in st.session_state:
     st.session_state.bot_rules = """1. Return period is 14 days.
 2. Opened products cannot be returned.
 3. Shipping is 50 TL for orders under 500 TL."""
 
-# --- 4. DATA FETCHING FUNCTIONS ---
+# --- 5. DATA FETCHING ---
 @st.cache_data(ttl=60)
 def get_data():
     try:
@@ -96,33 +118,28 @@ def get_products():
         return pd.DataFrame(), 0
     except: return pd.DataFrame(), 0
 
-# --- 5. STRATEGIC AI REPORT (FIXED: Uses Flash Model Now) ---
+# --- 6. STRATEGIC REPORT (Dynamic Model) ---
 def generate_strategic_report(df):
-    if df.empty: return "No data available for analysis."
+    if df.empty: return "No data available."
     messages_text = "\n".join(df["Message"].tail(30).astype(str).tolist())
     
     prompt = f"""
-    You are an expert E-Commerce Consultant. Here is the recent customer message data: {messages_text}
-    
-    YOUR MISSION: Analyze this data and write a strategic report for the business owner.
-    
-    RULES:
-    1. Do NOT just count emails. Find the ROOT CAUSE.
-    2. Provide clear, actionable advice.
-    
+    You are an expert E-Commerce Consultant. Data: {messages_text}
+    Analyze this data and write a strategic report.
     OUTPUT FORMAT:
-    📊 **Trend Analysis:** [What is happening?]
+    📊 **Trend Analysis:** [Insights]
     🚨 **Critical Issue:** [Main problem]
-    💡 **Action Plan:** [Step-by-step recommendations]
+    💡 **Action Plan:** [Recommendations]
     """
     try:
-        # HATA BURADAYDI: Eski 'gemini-pro' yerine yeni 'gemini-1.5-flash' yaptık.
-        model = genai.GenerativeModel('gemini-1.5-flash')
+        # Model ismini dinamik alıyoruz
+        model_name = get_best_model()
+        model = genai.GenerativeModel(model_name)
         response = model.generate_content(prompt)
         return response.text
-    except Exception as e: return f"Report Error: {str(e)}"
+    except Exception as e: return f"Report Error using {model_name}: {str(e)}"
 
-# --- 6. AI RESPONSE ENGINE ---
+# --- 7. AI RESPONSE (Dynamic Model) ---
 def get_ai_response(user_message, custom_rules):
     prompt = f"""
     You are 'Solace', a professional e-commerce assistant.
@@ -130,20 +147,21 @@ def get_ai_response(user_message, custom_rules):
     Date: {datetime.date.today().strftime("%Y-%m-%d")}
     {custom_rules}
     Customer Message: "{user_message}"
-    TASK: Reply politely adhering strictly to the rules. If the user speaks Turkish, reply in Turkish. If English, reply in English.
+    TASK: Reply politely adhering strictly to the rules.
     FORMAT: 
     CATEGORY: [RETURN/SHIPPING/QUESTION/OTHER] 
     ANSWER: [Your reply text]
     """
     try:
-        # Burası zaten doğru çalışıyordu (Flash kullanıyor)
-        model = genai.GenerativeModel('gemini-1.5-flash')
+        # Model ismini dinamik alıyoruz
+        model_name = get_best_model()
+        model = genai.GenerativeModel(model_name)
         response = model.generate_content(prompt)
         return response.text
     except Exception as e: 
         return f"CATEGORY: ERROR\nANSWER: AI Error: {str(e)}"
 
-# --- 7. SEND EMAIL ---
+# --- 8. SEND EMAIL ---
 def send_mail_reply(to_email, subject, body):
     try:
         server = smtplib.SMTP("smtp.gmail.com", 587)
@@ -158,7 +176,7 @@ def send_mail_reply(to_email, subject, body):
         return True
     except: return False
 
-# --- 8. PROCESS EMAILS ---
+# --- 9. PROCESS EMAILS ---
 def process_emails():
     with st.status("Solace Bot Running...", expanded=True) as status:
         st.write("🔌 Connecting to Gmail...")
@@ -273,7 +291,7 @@ if menu_selection == "🏠 Dashboard":
             fig = px.pie(df_msgs, names='Category', hole=0.4)
             st.plotly_chart(fig, use_container_width=True)
     with col2:
-        st.info("💡 **Solace** is active and protecting your business.")
+        st.info("💡 **Solace** is active.")
 
 elif menu_selection == "📦 Inventory":
     st.title("📦 Inventory Management")
@@ -297,7 +315,11 @@ elif menu_selection == "📊 Analysis":
     st.title("Strategic Message Analysis")
     with st.container():
         st.markdown("### 🧠 Solace AI Report")
-        st.caption("AI analyzes incoming messages and provides critical alerts for your business.")
+        st.caption("AI analyzes incoming messages and provides critical alerts.")
+        
+        # DEBUG: Hangi modelin kullanıldığını görelim
+        st.caption(f"Active Model: `{get_best_model()}`")
+        
         if st.button("✨ Generate Strategic Report", type="primary"):
             if not df_msgs.empty:
                 with st.spinner("Solace is analyzing data..."):
@@ -316,7 +338,7 @@ elif menu_selection == "📊 Analysis":
 elif menu_selection == "⚙️ Settings":
     st.title("Solace Settings")
     st.subheader("📜 Business Rules (Prompt)")
-    st.caption("Define how the bot should reply. You can write in English or Turkish here.")
+    st.caption("Define how the bot should reply.")
     new_rules = st.text_area("Edit Rules:", value=st.session_state.bot_rules, height=200)
     if st.button("Save Rules"):
         st.session_state.bot_rules = new_rules
