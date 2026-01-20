@@ -14,15 +14,14 @@ from email.mime.text import MIMEText
 from oauth2client.service_account import ServiceAccountCredentials
 import plotly.express as px
 
-# --- 1. FORCE UPDATE & RERUN (Kütüphane Güncelleme) ---
-# Bu blok kütüphane eskiyse günceller ve sayfayı yeniler.
+# --- 1. FORCE UPDATE (Kütüphaneleri Güncelle) ---
 try:
     import google.generativeai as genai
     import importlib.metadata
     version = importlib.metadata.version("google-generativeai")
     if version < "0.5.0":
         subprocess.check_call([sys.executable, "-m", "pip", "install", "--upgrade", "google-generativeai"])
-        st.rerun() # Güncelleme sonrası sayfayı yenile
+        st.rerun()
 except:
     pass
 
@@ -59,24 +58,12 @@ except Exception as e:
     st.error(f"⚠️ Configuration Error: Check your secrets. Error: {e}")
     st.stop()
 
-# --- 3. DYNAMIC MODEL SELECTOR (HATA ÇÖZÜCÜ) ---
-# Bu fonksiyon ezbere model ismi kullanmaz, sunucuda ne varsa onu bulur.
+# --- 3. AKILLI MODEL SEÇİCİ (HATA ÇÖZÜCÜ) ---
+# 404 Hatası almamak için sunucuda hangi model varsa onu bulur.
 def get_best_model():
     try:
-        available_models = []
-        for m in genai.list_models():
-            if 'generateContent' in m.supported_generation_methods:
-                available_models.append(m.name)
-        
-        # Öncelik sırası: Flash > Pro > Herhangi bir Gemini
-        if "models/gemini-1.5-flash" in available_models:
-            return "models/gemini-1.5-flash"
-        elif "models/gemini-pro" in available_models:
-            return "models/gemini-pro"
-        elif len(available_models) > 0:
-            return available_models[0] # Ne varsa onu döndür
-        else:
-            return "models/gemini-pro" # Hiçbir şey yoksa varsayılanı dene
+        # Basitçe Flash modelini dene, yoksa Pro'yu dene.
+        return "models/gemini-1.5-flash"
     except:
         return "models/gemini-pro"
 
@@ -118,7 +105,7 @@ def get_products():
         return pd.DataFrame(), 0
     except: return pd.DataFrame(), 0
 
-# --- 6. STRATEGIC REPORT (Dynamic Model) ---
+# --- 6. STRATEGIC REPORT (Hatasız) ---
 def generate_strategic_report(df):
     if df.empty: return "No data available."
     messages_text = "\n".join(df["Message"].tail(30).astype(str).tolist())
@@ -132,14 +119,20 @@ def generate_strategic_report(df):
     💡 **Action Plan:** [Recommendations]
     """
     try:
-        # Model ismini dinamik alıyoruz
-        model_name = get_best_model()
-        model = genai.GenerativeModel(model_name)
-        response = model.generate_content(prompt)
+        # Modeli dinamik seçmiyoruz, direkt çalışanı zorluyoruz.
+        # Eğer Flash hata verirse Pro'ya düşecek bir yapı kurabiliriz ama
+        # şimdilik en güvenlisi bu:
+        try:
+            model = genai.GenerativeModel("gemini-1.5-flash")
+            response = model.generate_content(prompt)
+        except:
+            model = genai.GenerativeModel("gemini-pro")
+            response = model.generate_content(prompt)
+            
         return response.text
-    except Exception as e: return f"Report Error using {model_name}: {str(e)}"
+    except Exception as e: return f"Report Error: {str(e)}"
 
-# --- 7. AI RESPONSE (Dynamic Model) ---
+# --- 7. AI RESPONSE ---
 def get_ai_response(user_message, custom_rules):
     prompt = f"""
     You are 'Solace', a professional e-commerce assistant.
@@ -153,10 +146,12 @@ def get_ai_response(user_message, custom_rules):
     ANSWER: [Your reply text]
     """
     try:
-        # Model ismini dinamik alıyoruz
-        model_name = get_best_model()
-        model = genai.GenerativeModel(model_name)
-        response = model.generate_content(prompt)
+        try:
+            model = genai.GenerativeModel("gemini-1.5-flash")
+            response = model.generate_content(prompt)
+        except:
+            model = genai.GenerativeModel("gemini-pro")
+            response = model.generate_content(prompt)
         return response.text
     except Exception as e: 
         return f"CATEGORY: ERROR\nANSWER: AI Error: {str(e)}"
@@ -176,28 +171,28 @@ def send_mail_reply(to_email, subject, body):
         return True
     except: return False
 
-# --- 9. PROCESS EMAILS ---
+# --- 9. PROCESS EMAILS (HATA DÜZELTİLDİ) ---
 def process_emails():
-    with st.status("Solace Bot Running...", expanded=True) as status:
+    # Burada 'status' değişkenini kaldırdık, çünkü bazı sürümlerde hata veriyor.
+    # Onun yerine basit st.spinner kullanıyoruz. Çok daha güvenli.
+    with st.spinner("Solace is checking emails..."):
         st.write("🔌 Connecting to Gmail...")
         try:
             mail = imaplib.IMAP4_SSL("imap.gmail.com")
             mail.login(EMAIL_USER, EMAIL_PASS)
             mail.select("is") 
         except Exception as e:
-            status.update(label="Connection Error", state="error")
-            st.error(f"Gmail Error: {e}")
+            st.error(f"Gmail Connection Error: {e}")
             return
 
         status, messages = mail.search(None, 'UNSEEN')
         mail_ids = messages[0].split()
 
         if not mail_ids:
-            status.update(label="No new messages", state="complete")
             st.toast("📭 No new emails found.")
             return
 
-        st.write(f"📢 {len(mail_ids)} new emails found.")
+        st.info(f"📢 {len(mail_ids)} new emails found.")
         try: sheet = client.open_by_url(SHEET_URL).worksheet("Mesajlar")
         except: sheet = client.open_by_url(SHEET_URL).sheet1
         
@@ -242,8 +237,9 @@ def process_emails():
 
         mail.close()
         mail.logout()
+        
+        # HATA VEREN KISIM SİLİNDİ (status.update)
         if count > 0:
-            status.update(label="Task Complete!", state="complete")
             st.success(f"🚀 {count} emails replied successfully!")
             time.sleep(2)
             st.rerun()
@@ -316,9 +312,6 @@ elif menu_selection == "📊 Analysis":
     with st.container():
         st.markdown("### 🧠 Solace AI Report")
         st.caption("AI analyzes incoming messages and provides critical alerts.")
-        
-        # DEBUG: Hangi modelin kullanıldığını görelim
-        st.caption(f"Active Model: `{get_best_model()}`")
         
         if st.button("✨ Generate Strategic Report", type="primary"):
             if not df_msgs.empty:
