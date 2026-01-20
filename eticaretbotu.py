@@ -58,14 +58,31 @@ except Exception as e:
     st.error(f"⚠️ Configuration Error: Check your secrets. Error: {e}")
     st.stop()
 
-# --- 3. AKILLI MODEL SEÇİCİ (HATA ÇÖZÜCÜ) ---
-# 404 Hatası almamak için sunucuda hangi model varsa onu bulur.
-def get_best_model():
-    try:
-        # Basitçe Flash modelini dene, yoksa Pro'yu dene.
-        return "models/gemini-1.5-flash"
-    except:
-        return "models/gemini-pro"
+# --- 3. GARANTİ MODEL SEÇİCİ (BRUTE FORCE) ---
+# Bu fonksiyon tek tek tüm isimleri dener. Biri mutlaka çalışır.
+def try_generate_content(prompt):
+    # Denenecek model isimleri sırasıyla:
+    model_candidates = [
+        "gemini-1.5-flash", 
+        "models/gemini-1.5-flash", 
+        "gemini-pro", 
+        "models/gemini-pro",
+        "gemini-1.5-pro"
+    ]
+    
+    last_error = ""
+    
+    for model_name in model_candidates:
+        try:
+            model = genai.GenerativeModel(model_name)
+            response = model.generate_content(prompt)
+            return response.text # Çalışırsa hemen döndür ve çık
+        except Exception as e:
+            last_error = str(e)
+            continue # Çalışmazsa sıradakine geç
+            
+    # Hiçbiri çalışmazsa hata mesajı döndür
+    return f"AI Service Unavailable. Last Error: {last_error}"
 
 # --- 4. DYNAMIC RULES ---
 if "bot_rules" not in st.session_state:
@@ -105,7 +122,7 @@ def get_products():
         return pd.DataFrame(), 0
     except: return pd.DataFrame(), 0
 
-# --- 6. STRATEGIC REPORT (Hatasız) ---
+# --- 6. STRATEGIC REPORT (Tank Modu) ---
 def generate_strategic_report(df):
     if df.empty: return "No data available."
     messages_text = "\n".join(df["Message"].tail(30).astype(str).tolist())
@@ -118,21 +135,10 @@ def generate_strategic_report(df):
     🚨 **Critical Issue:** [Main problem]
     💡 **Action Plan:** [Recommendations]
     """
-    try:
-        # Modeli dinamik seçmiyoruz, direkt çalışanı zorluyoruz.
-        # Eğer Flash hata verirse Pro'ya düşecek bir yapı kurabiliriz ama
-        # şimdilik en güvenlisi bu:
-        try:
-            model = genai.GenerativeModel("gemini-1.5-flash")
-            response = model.generate_content(prompt)
-        except:
-            model = genai.GenerativeModel("gemini-pro")
-            response = model.generate_content(prompt)
-            
-        return response.text
-    except Exception as e: return f"Report Error: {str(e)}"
+    # Eski tekli deneme yerine, çoklu deneme fonksiyonunu çağırıyoruz:
+    return try_generate_content(prompt)
 
-# --- 7. AI RESPONSE ---
+# --- 7. AI RESPONSE (Tank Modu) ---
 def get_ai_response(user_message, custom_rules):
     prompt = f"""
     You are 'Solace', a professional e-commerce assistant.
@@ -145,16 +151,8 @@ def get_ai_response(user_message, custom_rules):
     CATEGORY: [RETURN/SHIPPING/QUESTION/OTHER] 
     ANSWER: [Your reply text]
     """
-    try:
-        try:
-            model = genai.GenerativeModel("gemini-1.5-flash")
-            response = model.generate_content(prompt)
-        except:
-            model = genai.GenerativeModel("gemini-pro")
-            response = model.generate_content(prompt)
-        return response.text
-    except Exception as e: 
-        return f"CATEGORY: ERROR\nANSWER: AI Error: {str(e)}"
+    # Burada da garanti fonksiyonu kullanıyoruz
+    return try_generate_content(prompt)
 
 # --- 8. SEND EMAIL ---
 def send_mail_reply(to_email, subject, body):
@@ -171,10 +169,8 @@ def send_mail_reply(to_email, subject, body):
         return True
     except: return False
 
-# --- 9. PROCESS EMAILS (HATA DÜZELTİLDİ) ---
+# --- 9. PROCESS EMAILS (Hatasız) ---
 def process_emails():
-    # Burada 'status' değişkenini kaldırdık, çünkü bazı sürümlerde hata veriyor.
-    # Onun yerine basit st.spinner kullanıyoruz. Çok daha güvenli.
     with st.spinner("Solace is checking emails..."):
         st.write("🔌 Connecting to Gmail...")
         try:
@@ -238,7 +234,6 @@ def process_emails():
         mail.close()
         mail.logout()
         
-        # HATA VEREN KISIM SİLİNDİ (status.update)
         if count > 0:
             st.success(f"🚀 {count} emails replied successfully!")
             time.sleep(2)
