@@ -73,7 +73,6 @@ def get_data():
         data = sheet.get_all_values()
         if len(data) > 1:
             df = pd.DataFrame(data[1:])
-            # Display headers in English
             expected_headers = ["Date", "Sender", "Subject", "Message", "Category", "AI_Reply"]
             if len(df.columns) >= 6:
                 df.columns = expected_headers + list(df.columns[6:])
@@ -89,19 +88,15 @@ def get_products():
         sheet = client.open_by_url(SHEET_URL).worksheet("Urunler")
         data = sheet.get_all_values()
         if len(data) > 1:
-            # Map columns to English names for the dataframe
             df = pd.DataFrame(data[1:], columns=["ProductName", "Stock", "Price", "Description"])
-            
-            # Numeric conversion
             df["Price"] = pd.to_numeric(df["Price"].astype(str).str.replace(' TL','').str.replace('$',''), errors='coerce').fillna(0)
             df["Stock"] = pd.to_numeric(df["Stock"], errors='coerce').fillna(0)
-            
             total_value = (df["Price"] * df["Stock"]).sum()
             return df, total_value
         return pd.DataFrame(), 0
     except: return pd.DataFrame(), 0
 
-# --- 5. STRATEGIC AI REPORT (English Prompt) ---
+# --- 5. STRATEGIC AI REPORT (FIXED: Uses Flash Model Now) ---
 def generate_strategic_report(df):
     if df.empty: return "No data available for analysis."
     messages_text = "\n".join(df["Message"].tail(30).astype(str).tolist())
@@ -109,10 +104,10 @@ def generate_strategic_report(df):
     prompt = f"""
     You are an expert E-Commerce Consultant. Here is the recent customer message data: {messages_text}
     
-    YOUR MISSION: Analyze this data and write a strategic report for the business owner to increase revenue or reduce issues.
+    YOUR MISSION: Analyze this data and write a strategic report for the business owner.
     
     RULES:
-    1. Do NOT just count emails (e.g., "5 emails received"). Find the ROOT CAUSE.
+    1. Do NOT just count emails. Find the ROOT CAUSE.
     2. Provide clear, actionable advice.
     
     OUTPUT FORMAT:
@@ -121,37 +116,32 @@ def generate_strategic_report(df):
     💡 **Action Plan:** [Step-by-step recommendations]
     """
     try:
-        model = genai.GenerativeModel('gemini-pro')
+        # HATA BURADAYDI: Eski 'gemini-pro' yerine yeni 'gemini-1.5-flash' yaptık.
+        model = genai.GenerativeModel('gemini-1.5-flash')
         response = model.generate_content(prompt)
         return response.text
     except Exception as e: return f"Report Error: {str(e)}"
 
-# --- 6. AI RESPONSE ENGINE (English Instructions) ---
+# --- 6. AI RESPONSE ENGINE ---
 def get_ai_response(user_message, custom_rules):
     prompt = f"""
     You are 'Solace', a professional e-commerce assistant.
-    
     BUSINESS RULES:
     Date: {datetime.date.today().strftime("%Y-%m-%d")}
     {custom_rules}
-    
     Customer Message: "{user_message}"
-    
     TASK: Reply politely adhering strictly to the rules. If the user speaks Turkish, reply in Turkish. If English, reply in English.
-    
-    FORMAT (Strictly follow this): 
+    FORMAT: 
     CATEGORY: [RETURN/SHIPPING/QUESTION/OTHER] 
     ANSWER: [Your reply text]
     """
     try:
-        try:
-            model = genai.GenerativeModel('gemini-1.5-flash')
-            response = model.generate_content(prompt)
-        except:
-            model = genai.GenerativeModel('gemini-pro')
-            response = model.generate_content(prompt)
+        # Burası zaten doğru çalışıyordu (Flash kullanıyor)
+        model = genai.GenerativeModel('gemini-1.5-flash')
+        response = model.generate_content(prompt)
         return response.text
-    except Exception as e: return f"CATEGORY: ERROR\nANSWER: AI Error: {str(e)}"
+    except Exception as e: 
+        return f"CATEGORY: ERROR\nANSWER: AI Error: {str(e)}"
 
 # --- 7. SEND EMAIL ---
 def send_mail_reply(to_email, subject, body):
@@ -217,7 +207,6 @@ def process_emails():
                         st.write(f"📩 Processing: {subject}")
                         ai_full_response = get_ai_response(body, current_rules)
 
-                        # Parse English Keys
                         kategori = "GENERAL"
                         cevap = ai_full_response
                         if "CATEGORY:" in ai_full_response:
@@ -268,7 +257,6 @@ if menu_selection == "🏠 Dashboard":
     c1, c2, c3, c4 = st.columns(4)
     c1.metric("Total Messages", len(df_msgs))
     
-    # Handle both Turkish (Old) and English (New) tags for metrics
     if not df_msgs.empty and "Category" in df_msgs.columns:
         iade_sayisi = len(df_msgs[df_msgs["Category"].astype(str).str.contains("RETURN|IADE", case=False, na=False)])
     else:
