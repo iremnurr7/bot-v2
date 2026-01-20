@@ -14,7 +14,7 @@ from email.mime.text import MIMEText
 from oauth2client.service_account import ServiceAccountCredentials
 import plotly.express as px
 
-# --- 1. ZORLA GÜNCELLEME (Gerekli) ---
+# --- 1. FORCE UPDATE (Libraries) ---
 try:
     import google.generativeai as genai
     import importlib.metadata
@@ -25,10 +25,10 @@ except:
     subprocess.check_call([sys.executable, "-m", "pip", "install", "--upgrade", "google-generativeai"])
     import google.generativeai as genai
 
-# --- SAYFA AYARLARI (İSİM GÜNCELLENDİ) ---
+# --- PAGE CONFIG ---
 st.set_page_config(page_title="Solace Admin", layout="wide", page_icon="🌑")
 
-# --- CSS TASARIM ---
+# --- CSS STYLING ---
 st.markdown("""
     <style>
     @import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;500;700&display=swap');
@@ -40,7 +40,7 @@ st.markdown("""
     </style>
     """, unsafe_allow_html=True)
 
-# --- 2. AYARLARI AL ---
+# --- 2. LOAD SECRETS ---
 try:
     GOOGLE_API_KEY = st.secrets["gemini_anahtari"]
     EMAIL_USER = st.secrets["email_user"]
@@ -55,16 +55,16 @@ try:
     genai.configure(api_key=GOOGLE_API_KEY)
     
 except Exception as e:
-    st.error(f"⚠️ Ayar Hatası: Secrets kısmını kontrol et. Hata: {e}")
+    st.error(f"⚠️ Configuration Error: Check your secrets. Error: {e}")
     st.stop()
 
-# --- 3. DİNAMİK KURALLAR ---
+# --- 3. DYNAMIC RULES (Default English) ---
 if "bot_rules" not in st.session_state:
-    st.session_state.bot_rules = """1. İade süresi 14 gündür.
-2. Ambalajı açılmış ürün iade alınmaz.
-3. 500 TL altı kargo 50 TL'dir."""
+    st.session_state.bot_rules = """1. Return period is 14 days.
+2. Opened products cannot be returned.
+3. Shipping is 50 TL for orders under 500 TL."""
 
-# --- 4. VERİ ÇEKME FONKSİYONLARI ---
+# --- 4. DATA FETCHING FUNCTIONS ---
 @st.cache_data(ttl=60)
 def get_data():
     try:
@@ -73,6 +73,7 @@ def get_data():
         data = sheet.get_all_values()
         if len(data) > 1:
             df = pd.DataFrame(data[1:])
+            # Display headers in English
             expected_headers = ["Date", "Sender", "Subject", "Message", "Category", "AI_Reply"]
             if len(df.columns) >= 6:
                 df.columns = expected_headers + list(df.columns[6:])
@@ -88,43 +89,59 @@ def get_products():
         sheet = client.open_by_url(SHEET_URL).worksheet("Urunler")
         data = sheet.get_all_values()
         if len(data) > 1:
-            df = pd.DataFrame(data[1:], columns=["UrunAdi", "Stok", "Fiyat", "Aciklama"])
-            df["Fiyat"] = pd.to_numeric(df["Fiyat"].astype(str).str.replace(' TL','').str.replace('$',''), errors='coerce').fillna(0)
-            df["Stok"] = pd.to_numeric(df["Stok"], errors='coerce').fillna(0)
-            total_value = (df["Fiyat"] * df["Stok"]).sum()
+            # Map columns to English names for the dataframe
+            df = pd.DataFrame(data[1:], columns=["ProductName", "Stock", "Price", "Description"])
+            
+            # Numeric conversion
+            df["Price"] = pd.to_numeric(df["Price"].astype(str).str.replace(' TL','').str.replace('$',''), errors='coerce').fillna(0)
+            df["Stock"] = pd.to_numeric(df["Stock"], errors='coerce').fillna(0)
+            
+            total_value = (df["Price"] * df["Stock"]).sum()
             return df, total_value
         return pd.DataFrame(), 0
     except: return pd.DataFrame(), 0
 
-# --- 5. STRATEJİK AI RAPORU ---
+# --- 5. STRATEGIC AI REPORT (English Prompt) ---
 def generate_strategic_report(df):
-    if df.empty: return "Analiz edilecek veri yok."
+    if df.empty: return "No data available for analysis."
     messages_text = "\n".join(df["Message"].tail(30).astype(str).tolist())
     
     prompt = f"""
-    Sen uzman bir E-Ticaret Danışmanısın. Veriler: {messages_text}
-    GÖREVİN: İşletme sahibine stratejik bir rapor yaz.
-    KURALLAR: Asla sayı sayma ("5 mail geldi" deme). Sorunların kök nedenini bul ve aksiyon öner.
-    ÇIKTI FORMATI:
-    📊 **Trend Analizi:** [Trendler]
-    🚨 **Kritik Sorun:** [En büyük sorun]
-    💡 **Aksiyon Planı:** [Maddeler halinde öneriler]
+    You are an expert E-Commerce Consultant. Here is the recent customer message data: {messages_text}
+    
+    YOUR MISSION: Analyze this data and write a strategic report for the business owner to increase revenue or reduce issues.
+    
+    RULES:
+    1. Do NOT just count emails (e.g., "5 emails received"). Find the ROOT CAUSE.
+    2. Provide clear, actionable advice.
+    
+    OUTPUT FORMAT:
+    📊 **Trend Analysis:** [What is happening?]
+    🚨 **Critical Issue:** [Main problem]
+    💡 **Action Plan:** [Step-by-step recommendations]
     """
     try:
         model = genai.GenerativeModel('gemini-pro')
         response = model.generate_content(prompt)
         return response.text
-    except Exception as e: return f"Rapor hatası: {str(e)}"
+    except Exception as e: return f"Report Error: {str(e)}"
 
-# --- 6. AI CEVAPLAYICI ---
+# --- 6. AI RESPONSE ENGINE (English Instructions) ---
 def get_ai_response(user_message, custom_rules):
     prompt = f"""
-    Sen 'Solace' adında profesyonel bir asistanısın.
-    KURALLAR: Bugün {datetime.date.today().strftime("%Y-%m-%d")}.
+    You are 'Solace', a professional e-commerce assistant.
+    
+    BUSINESS RULES:
+    Date: {datetime.date.today().strftime("%Y-%m-%d")}
     {custom_rules}
-    Müşteri Mesajı: "{user_message}"
-    GÖREV: Kurallara sadık kalarak nazikçe cevap yaz.
-    FORMAT: KATEGORI: [IADE/KARGO/SORU] CEVAP: [Metin]
+    
+    Customer Message: "{user_message}"
+    
+    TASK: Reply politely adhering strictly to the rules. If the user speaks Turkish, reply in Turkish. If English, reply in English.
+    
+    FORMAT (Strictly follow this): 
+    CATEGORY: [RETURN/SHIPPING/QUESTION/OTHER] 
+    ANSWER: [Your reply text]
     """
     try:
         try:
@@ -134,9 +151,9 @@ def get_ai_response(user_message, custom_rules):
             model = genai.GenerativeModel('gemini-pro')
             response = model.generate_content(prompt)
         return response.text
-    except Exception as e: return f"KATEGORI: HATA\nCEVAP: AI Hatası: {str(e)}"
+    except Exception as e: return f"CATEGORY: ERROR\nANSWER: AI Error: {str(e)}"
 
-# --- 7. MAİL GÖNDERME ---
+# --- 7. SEND EMAIL ---
 def send_mail_reply(to_email, subject, body):
     try:
         server = smtplib.SMTP("smtp.gmail.com", 587)
@@ -151,28 +168,28 @@ def send_mail_reply(to_email, subject, body):
         return True
     except: return False
 
-# --- 8. MAİL İŞLEME SÜRECİ ---
+# --- 8. PROCESS EMAILS ---
 def process_emails():
-    with st.status("Solace Bot Çalışıyor...", expanded=True) as status:
-        st.write("🔌 Gmail'e bağlanılıyor...")
+    with st.status("Solace Bot Running...", expanded=True) as status:
+        st.write("🔌 Connecting to Gmail...")
         try:
             mail = imaplib.IMAP4_SSL("imap.gmail.com")
             mail.login(EMAIL_USER, EMAIL_PASS)
             mail.select("is") 
         except Exception as e:
-            status.update(label="Hata", state="error")
-            st.error(f"Gmail Bağlantı Hatası: {e}")
+            status.update(label="Connection Error", state="error")
+            st.error(f"Gmail Error: {e}")
             return
 
         status, messages = mail.search(None, 'UNSEEN')
         mail_ids = messages[0].split()
 
         if not mail_ids:
-            status.update(label="Yeni mesaj yok", state="complete")
-            st.toast("📭 Yeni mail yok.")
+            status.update(label="No new messages", state="complete")
+            st.toast("📭 No new emails found.")
             return
 
-        st.write(f"📢 {len(mail_ids)} yeni mail bulundu.")
+        st.write(f"📢 {len(mail_ids)} new emails found.")
         try: sheet = client.open_by_url(SHEET_URL).worksheet("Mesajlar")
         except: sheet = client.open_by_url(SHEET_URL).sheet1
         
@@ -197,114 +214,122 @@ def process_emails():
                                     break
                         else: body = msg.get_payload(decode=True).decode()
 
-                        st.write(f"📩 İşleniyor: {subject}")
+                        st.write(f"📩 Processing: {subject}")
                         ai_full_response = get_ai_response(body, current_rules)
 
-                        kategori = "GENEL"
+                        # Parse English Keys
+                        kategori = "GENERAL"
                         cevap = ai_full_response
-                        if "KATEGORI:" in ai_full_response:
-                            parts = ai_full_response.split("CEVAP:")
+                        if "CATEGORY:" in ai_full_response:
+                            parts = ai_full_response.split("ANSWER:")
                             if len(parts) > 1:
-                                kategori = parts[0].split("KATEGORI:")[1].strip()
+                                kategori = parts[0].split("CATEGORY:")[1].strip()
                                 cevap = parts[1].strip()
 
                         sheet.append_row([datetime.datetime.now().strftime("%Y-%m-%d %H:%M"), sender, subject, body, kategori, cevap])
                         if send_mail_reply(sender, f"Re: {subject}", cevap):
-                            st.write(f"✅ Yanıtlandı: {kategori}")
+                            st.write(f"✅ Replied: {kategori}")
                             count += 1
             except Exception as loop_e:
-                st.error(f"Hata: {loop_e}")
+                st.error(f"Error: {loop_e}")
 
         mail.close()
         mail.logout()
         if count > 0:
-            status.update(label="İşlem Tamamlandı!", state="complete")
-            st.success(f"🚀 {count} mail yanıtlandı!")
+            status.update(label="Task Complete!", state="complete")
+            st.success(f"🚀 {count} emails replied successfully!")
             time.sleep(2)
             st.rerun()
 
-# --- MENÜ (GÜNCELLENDİ) ---
+# --- SIDEBAR MENU ---
 with st.sidebar:
-    st.title("🌑 SOLACE") # İsim değişti
-    st.caption("AI-Powered Commerce") # Alt başlık
+    st.title("🌑 SOLACE") 
+    st.caption("AI-Powered Commerce")
     
-    if st.button("📥 Mailleri Çek & Yanıtla", type="primary"):
+    if st.button("📥 Fetch & Reply Emails", type="primary"):
         process_emails()
     st.markdown("---")
-    menu_selection = st.radio("MENÜ", ["🏠 Dashboard", "📦 Stok Yönetimi", "📊 Mesaj Analizi", "⚙️ Ayarlar"])
+    menu_selection = st.radio("MENU", ["🏠 Dashboard", "📦 Inventory", "📊 Analysis", "⚙️ Settings"])
     st.markdown("---")
-    if st.button("🔄 Yenile"): 
+    if st.button("🔄 Refresh"): 
         st.cache_data.clear()
         st.rerun()
 
-# --- VERİLER ---
+# --- DATA PREP ---
 df_msgs = get_data()
 df_prods, total_stock_value = get_products()
 
-# --- SAYFALAR ---
+# --- PAGES ---
 
 if menu_selection == "🏠 Dashboard":
-    st.title("Solace Yönetim Paneli")
+    st.title("Solace Management Panel")
     st.markdown(f"*{datetime.date.today().strftime('%d %B %Y')}*")
     
     c1, c2, c3, c4 = st.columns(4)
-    c1.metric("Toplam Mesaj", len(df_msgs))
-    iade_sayisi = len(df_msgs[df_msgs["Category"] == "IADE"]) if "Category" in df_msgs.columns else 0
-    c2.metric("İade Talepleri", iade_sayisi)
-    c3.metric("Envanter Değeri", f"{total_stock_value:,.0f} TL")
-    c4.metric("Ürün Çeşidi", len(df_prods))
+    c1.metric("Total Messages", len(df_msgs))
+    
+    # Handle both Turkish (Old) and English (New) tags for metrics
+    if not df_msgs.empty and "Category" in df_msgs.columns:
+        iade_sayisi = len(df_msgs[df_msgs["Category"].astype(str).str.contains("RETURN|IADE", case=False, na=False)])
+    else:
+        iade_sayisi = 0
+        
+    c2.metric("Return Requests", iade_sayisi)
+    c3.metric("Inventory Value", f"{total_stock_value:,.0f} TL")
+    c4.metric("Product Variety", len(df_prods))
     
     col1, col2 = st.columns(2)
     with col1:
-        st.subheader("Talep Dağılımı")
+        st.subheader("Request Distribution")
         if not df_msgs.empty and "Category" in df_msgs.columns:
             fig = px.pie(df_msgs, names='Category', hole=0.4)
             st.plotly_chart(fig, use_container_width=True)
     with col2:
-        st.info("💡 **Solace** aktif ve işletmenizi koruyor.")
+        st.info("💡 **Solace** is active and protecting your business.")
 
-elif menu_selection == "📦 Stok Yönetimi":
-    st.title("📦 Ürünler & Stok")
+elif menu_selection == "📦 Inventory":
+    st.title("📦 Inventory Management")
     if not df_prods.empty:
         st.dataframe(df_prods, use_container_width=True)
-    with st.expander("➕ Yeni Ürün Ekle"):
+    with st.expander("➕ Add New Product"):
         with st.form("add_prod"):
             c1, c2 = st.columns(2)
-            isim = c1.text_input("Ürün Adı")
-            fiyat = c1.number_input("Fiyat (TL)", min_value=0.0)
-            stok = c2.number_input("Stok", min_value=0)
-            aciklama = c2.text_input("Açıklama")
-            if st.form_submit_button("Kaydet"):
+            isim = c1.text_input("Product Name")
+            fiyat = c1.number_input("Price (TL)", min_value=0.0)
+            stok = c2.number_input("Stock Qty", min_value=0)
+            aciklama = c2.text_input("Description")
+            if st.form_submit_button("Save to Database"):
                 try:
                     sheet = client.open_by_url(SHEET_URL).worksheet("Urunler")
                     sheet.append_row([isim, stok, fiyat, aciklama])
-                    st.success("Eklendi!"); st.rerun()
-                except: st.error("Hata.")
+                    st.success("Product Added!"); st.rerun()
+                except: st.error("Error saving data.")
 
-elif menu_selection == "📊 Mesaj Analizi":
-    st.title("Stratejik Mesaj Analizi")
+elif menu_selection == "📊 Analysis":
+    st.title("Strategic Message Analysis")
     with st.container():
-        st.markdown("### 🧠 Solace AI Raporu")
-        st.caption("Gelen mesajları analiz eder ve işletmen için kritik uyarılarda bulunur.")
-        if st.button("✨ Stratejik Rapor Üret", type="primary"):
+        st.markdown("### 🧠 Solace AI Report")
+        st.caption("AI analyzes incoming messages and provides critical alerts for your business.")
+        if st.button("✨ Generate Strategic Report", type="primary"):
             if not df_msgs.empty:
-                with st.spinner("Solace verileri inceliyor..."):
+                with st.spinner("Solace is analyzing data..."):
                     report = generate_strategic_report(df_msgs)
                     st.markdown("---")
                     st.markdown(report)
             else:
-                st.warning("Yeterli veri yok.")
+                st.warning("Not enough data for analysis.")
     st.markdown("---")
-    st.subheader("📨 Mesaj Geçmişi")
+    st.subheader("📨 Message History")
     if not df_msgs.empty:
         st.dataframe(df_msgs, use_container_width=True)
     else:
-        st.info("Henüz mesaj yok.")
+        st.info("No messages found.")
 
-elif menu_selection == "⚙️ Ayarlar":
-    st.title("Solace Ayarları")
-    st.subheader("📜 İşletme Kuralları")
-    new_rules = st.text_area("Kuralları Düzenle:", value=st.session_state.bot_rules, height=200)
-    if st.button("Kuralları Kaydet"):
+elif menu_selection == "⚙️ Settings":
+    st.title("Solace Settings")
+    st.subheader("📜 Business Rules (Prompt)")
+    st.caption("Define how the bot should reply. You can write in English or Turkish here.")
+    new_rules = st.text_area("Edit Rules:", value=st.session_state.bot_rules, height=200)
+    if st.button("Save Rules"):
         st.session_state.bot_rules = new_rules
-        st.success("Kurallar güncellendi!")
+        st.success("Rules updated successfully!")
