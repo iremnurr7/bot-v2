@@ -28,15 +28,56 @@ except:
 # --- PAGE CONFIG ---
 st.set_page_config(page_title="Solace Admin", layout="wide", page_icon="🌑")
 
-# --- CSS STYLING ---
+# --- CSS STYLING (ZORLA KARANLIK MOD - MOBİL UYUMLU) ---
 st.markdown("""
     <style>
     @import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;500;700&display=swap');
-    html, body, [class*="css"] { font-family: 'Inter', sans-serif; background-color: #0F172A; color: #F8FAFC; }
-    section[data-testid="stSidebar"] { background-color: #1E293B; border-right: 1px solid #334155; }
-    div[data-testid="stMetric"] { background-color: #1E293B; border: 1px solid #334155; padding: 20px; border-radius: 15px; text-align: center; }
-    div[data-testid="stMetricValue"] { font-size: 2rem !important; color: #3B82F6; }
-    div[data-baseweb="textarea"] { background-color: #334155 !important; color: white !important; }
+    
+    /* 1. Ana Arka Planı Zorla Boya */
+    [data-testid="stAppViewContainer"] {
+        background-color: #0F172A !important;
+    }
+    
+    /* 2. Yan Menüyü (Sidebar) Boya */
+    section[data-testid="stSidebar"] {
+        background-color: #1E293B !important;
+        border-right: 1px solid #334155;
+    }
+    
+    /* 3. Tüm Yazıları Beyaz/Gri Yap */
+    h1, h2, h3, h4, h5, h6, p, span, div, label, li {
+        color: #F8FAFC !important;
+        font-family: 'Inter', sans-serif;
+    }
+    
+    /* 4. Kutucukları (Input), Butonları ve Tabloları Düzelt */
+    div[data-baseweb="input"], div[data-baseweb="textarea"], div[data-baseweb="select"] {
+        background-color: #334155 !important;
+        border: 1px solid #475569 !important;
+        color: white !important;
+    }
+    input, textarea, select {
+        color: white !important;
+        caret-color: white !important;
+    }
+    
+    /* 5. Metrik Kutuları */
+    div[data-testid="stMetric"] {
+        background-color: #1E293B !important;
+        border: 1px solid #334155 !important;
+        padding: 20px;
+        border-radius: 15px;
+        text-align: center;
+    }
+    div[data-testid="stMetricValue"] {
+        font-size: 2rem !important;
+        color: #3B82F6 !important;
+    }
+
+    /* 6. Üst Şeridi Gizle */
+    header[data-testid="stHeader"] {
+        background-color: rgba(0,0,0,0) !important;
+    }
     </style>
     """, unsafe_allow_html=True)
 
