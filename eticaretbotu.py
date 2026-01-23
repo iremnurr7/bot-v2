@@ -28,7 +28,7 @@ except:
 # --- PAGE CONFIG ---
 st.set_page_config(page_title="Solace Admin", layout="wide", page_icon="🌑")
 
-# --- CSS STYLING (ZORLA KARANLIK MOD - MOBİL UYUMLU) ---
+# --- CSS STYLING (ZORLA KARANLIK MOD - GRAFİK DÜZELTMELİ) ---
 st.markdown("""
     <style>
     @import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;500;700&display=swap');
@@ -137,27 +137,22 @@ def get_data():
 @st.cache_data(ttl=60)
 def get_products():
     try:
-        # Hata önleyici: Müşteri sayfa adını yanlış yazarsa veya Urunler sayfası yoksa patlamasın
         try:
             sheet = client.open_by_url(SHEET_URL).worksheet("Urunler")
         except:
-            # Eğer Urunler sayfası yoksa boş dataframe dön
             return pd.DataFrame(), 0, ""
 
         data = sheet.get_all_values()
         if len(data) > 1:
-            # Sütun isimlerini standartlaştırıyoruz (ilk satır başlık kabul edilir)
             headers = data[0]
             df = pd.DataFrame(data[1:], columns=headers)
             
-            # AI için metin formatına çevir (Ürün bilgisi: Adı X, Fiyatı Y...)
             product_text_list = []
             for index, row in df.iterrows():
                 row_str = ", ".join([f"{col}: {val}" for col, val in row.items() if val])
                 product_text_list.append(f"- {row_str}")
             product_context = "\n".join(product_text_list)
 
-            # Dashboard hesaplamaları için basit temizlik (Hata verirse 0 kabul et)
             total_value = 0
             if "Price" in df.columns and "Stock" in df.columns:
                 try:
@@ -190,7 +185,7 @@ def generate_strategic_report(df):
         return response.text
     except Exception as e: return f"Report Error using {model_name}: {str(e)}"
 
-# --- 7. AI RESPONSE (GELİŞMİŞ) ---
+# --- 7. AI RESPONSE ---
 def get_ai_response(user_message, custom_rules, product_info):
     prompt = f"""
     You are 'Solace', a professional e-commerce assistant.
@@ -209,9 +204,9 @@ def get_ai_response(user_message, custom_rules, product_info):
     "{user_message}"
     
     --- INSTRUCTIONS ---
-    1. LANGUAGE: You MUST reply in ENGLISH only. Even if the input is Turkish, reply in English.
-    2. ACCURACY: Use the Product List above to answer price/stock questions. Do not invent prices.
-    3. SAFETY: If the answer is not in the Rules or Product List, reply: "I don't have the details for this specific query right now. Our support team has been notified and will contact you shortly." and mark category as OTHER.
+    1. LANGUAGE: You MUST reply in ENGLISH only.
+    2. ACCURACY: Use the Product List above to answer price/stock questions.
+    3. SAFETY: If the answer is not in the Rules or Product List, reply: "I don't have the details for this specific query right now." and mark category as OTHER.
     4. CATEGORY: Use exactly: RETURN, SHIPPING, QUESTION, or OTHER.
     
     FORMAT: 
@@ -241,9 +236,8 @@ def send_mail_reply(to_email, subject, body):
         return True
     except: return False
 
-# --- 9. PROCESS EMAILS (ESNEK KLASÖR SEÇİMİ) ---
+# --- 9. PROCESS EMAILS ---
 def process_emails():
-    # Ürün bilgisini çekiyoruz ki cevaba ekleyelim
     _, _, product_context = get_products()
     
     with st.spinner("Solace is checking emails..."):
@@ -252,17 +246,11 @@ def process_emails():
             mail = imaplib.IMAP4_SSL("imap.gmail.com")
             mail.login(EMAIL_USER, EMAIL_PASS)
             
-            # --- DİNAMİK KLASÖR SEÇİMİ ---
-            # Secrets'tan 'mail_klasoru' bilgisini al. Yoksa varsayılan 'INBOX' olsun.
-            # Müşteri secrets'a mail_klasoru = "is" yazarsa "is" klasörüne bakar.
-            # Hiçbir şey yazmazsa INBOX'a bakar.
             target_folder = st.secrets.get("mail_klasoru", "INBOX")
-            
-            # Klasörü seçmeyi dene
             status, messages = mail.select(target_folder)
             
             if status != 'OK':
-                st.error(f"❌ Error: The folder '{target_folder}' was not found in this Gmail account. Please check 'secrets' configuration.")
+                st.error(f"❌ Error: The folder '{target_folder}' was not found.")
                 return
             else:
                 st.info(f"📂 Scanning folder: {target_folder}")
@@ -304,8 +292,6 @@ def process_emails():
                         else: body = msg.get_payload(decode=True).decode()
 
                         st.write(f"📩 Processing: {subject}")
-                        
-                        # AI Fonksiyonuna ürün bilgisini de gönderiyoruz
                         ai_full_response = get_ai_response(body, current_rules, product_context)
 
                         kategori = "GENERAL"
@@ -372,6 +358,12 @@ if menu_selection == "🏠 Dashboard":
         st.subheader("Request Distribution")
         if not df_msgs.empty and "Category" in df_msgs.columns:
             fig = px.pie(df_msgs, names='Category', hole=0.4)
+            # --- DÜZELTME BURADA: Grafik Arka Planını Şeffaf Yapıyoruz ---
+            fig.update_layout(
+                paper_bgcolor="rgba(0,0,0,0)", 
+                plot_bgcolor="rgba(0,0,0,0)",
+                font=dict(color="white") # Yazılar Beyaz Olsun
+            )
             st.plotly_chart(fig, use_container_width=True)
     with col2:
         st.info("💡 **Solace** is active.")
@@ -381,7 +373,7 @@ elif menu_selection == "📦 Inventory":
     if not df_prods.empty:
         st.dataframe(df_prods, use_container_width=True)
     else:
-        st.info("No product data found. Please add products to the 'Urunler' sheet.")
+        st.info("No product data found.")
         
     with st.expander("➕ Add New Product"):
         with st.form("add_prod"):
@@ -395,14 +387,12 @@ elif menu_selection == "📦 Inventory":
                     sheet = client.open_by_url(SHEET_URL).worksheet("Urunler")
                     sheet.append_row([isim, stok, fiyat, aciklama])
                     st.success("Product Added!"); st.rerun()
-                except: st.error("Error saving data. Make sure 'Urunler' sheet exists.")
+                except: st.error("Error saving data.")
 
 elif menu_selection == "📊 Analysis":
     st.title("Strategic Message Analysis")
     with st.container():
         st.markdown("### 🧠 Solace AI Report")
-        st.caption("AI analyzes incoming messages and provides critical alerts.")
-        
         try:
              active_model = get_working_model()
              st.caption(f"Active Engine: `{active_model}`")
@@ -425,8 +415,6 @@ elif menu_selection == "📊 Analysis":
 
 elif menu_selection == "⚙️ Settings":
     st.title("Solace Settings")
-    st.subheader("📜 Business Rules (Prompt)")
-    st.caption("Define how the bot should reply.")
     new_rules = st.text_area("Edit Rules:", value=st.session_state.bot_rules, height=200)
     if st.button("Save Rules"):
         st.session_state.bot_rules = new_rules
