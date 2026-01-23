@@ -15,9 +15,7 @@ from email.mime.text import MIMEText
 from oauth2client.service_account import ServiceAccountCredentials
 import plotly.express as px
 
-# --- 0. OTOMATİK TEMA AYARI (SENİN YERİNE KLASÖR OLUŞTURUR) ---
-# Bu blok, kod çalıştığında otomatik olarak .streamlit/config.toml dosyasını oluşturur.
-# Böylece telefonda "Aydınlık Mod" olsa bile site Zorla Siyah açılır.
+# --- 0. OTOMATİK TEMA AYARI ---
 config_dir = ".streamlit"
 config_path = os.path.join(config_dir, "config.toml")
 
@@ -36,13 +34,12 @@ font = "sans serif"
     """
     with open(config_path, "w") as f:
         f.write(config_content)
-    # Ayarların aktif olması için sayfayı bir kez yenilememiz gerekebilir
     try:
         st.rerun()
     except:
         pass
 
-# --- 1. FORCE UPDATE (Kütüphaneleri Güncelle) ---
+# --- 1. FORCE UPDATE ---
 try:
     import google.generativeai as genai
     import importlib.metadata
@@ -56,30 +53,23 @@ except:
 # --- PAGE CONFIG ---
 st.set_page_config(page_title="Solace Admin", layout="wide", page_icon="🌑")
 
-# --- CSS STYLING (EKSTRA GÜÇLÜ BOYA) ---
+# --- CSS STYLING ---
 st.markdown("""
     <style>
     @import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;500;700&display=swap');
     
-    /* Her şeyi zorla siyah yap */
     [data-testid="stAppViewContainer"], body, html {
         background-color: #0F172A !important;
         color: #F8FAFC !important;
     }
-    
-    /* Yan Menü */
     section[data-testid="stSidebar"] {
         background-color: #1E293B !important;
         border-right: 1px solid #334155;
     }
-    
-    /* Yazılar */
     h1, h2, h3, h4, h5, h6, p, span, div, label, li, a {
         color: #F8FAFC !important;
         font-family: 'Inter', sans-serif;
     }
-    
-    /* Kutucuklar (Input) */
     div[data-baseweb="input"], div[data-baseweb="textarea"], div[data-baseweb="select"] {
         background-color: #334155 !important;
         border: 1px solid #475569 !important;
@@ -90,8 +80,6 @@ st.markdown("""
         caret-color: white !important;
         background-color: transparent !important;
     }
-    
-    /* Header Gizle */
     header[data-testid="stHeader"] {
         background-color: rgba(0,0,0,0) !important;
     }
@@ -171,10 +159,15 @@ def get_products():
             product_context = "\n".join(product_text_list)
 
             total_value = 0
-            if "Price" in df.columns and "Stock" in df.columns:
+            
+            # --- DÜZELTME: Türkçe/İngilizce Sütun Kontrolü ---
+            fiyat_col = "Price" if "Price" in df.columns else ("Fiyat" if "Fiyat" in df.columns else None)
+            stok_col = "Stock" if "Stock" in df.columns else ("Stok" if "Stok" in df.columns else None)
+
+            if fiyat_col and stok_col:
                 try:
-                    price_clean = pd.to_numeric(df["Price"].astype(str).str.replace(r'[^\d.]', '', regex=True), errors='coerce').fillna(0)
-                    stock_clean = pd.to_numeric(df["Stock"], errors='coerce').fillna(0)
+                    price_clean = pd.to_numeric(df[fiyat_col].astype(str).str.replace(r'[^\d.]', '', regex=True), errors='coerce').fillna(0)
+                    stock_clean = pd.to_numeric(df[stok_col], errors='coerce').fillna(0)
                     total_value = (price_clean * stock_clean).sum()
                 except: pass
             
@@ -334,15 +327,19 @@ def process_emails():
             time.sleep(2)
             st.rerun()
 
-# --- SIDEBAR MENU ---
+# --- SIDEBAR MENU (SADELEŞTİRİLMİŞ) ---
 with st.sidebar:
     st.title("🌑 SOLACE") 
     st.caption("AI-Powered Commerce")
     
     if st.button("📥 Fetch & Reply Emails", type="primary"):
         process_emails()
+    
     st.markdown("---")
+
+    # --- TEK PAKET OLDUĞU İÇİN HERKES HER ŞEYİ GÖRÜR ---
     menu_selection = st.radio("MENU", ["🏠 Dashboard", "📦 Inventory", "📊 Analysis", "⚙️ Settings"])
+    
     st.markdown("---")
     if st.button("🔄 Refresh"): 
         st.cache_data.clear()
