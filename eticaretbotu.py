@@ -9,10 +9,38 @@ import smtplib
 import imaplib
 import email
 import datetime
+import os
 from email.header import decode_header
 from email.mime.text import MIMEText
 from oauth2client.service_account import ServiceAccountCredentials
 import plotly.express as px
+
+# --- 0. OTOMATİK TEMA AYARI (SENİN YERİNE KLASÖR OLUŞTURUR) ---
+# Bu blok, kod çalıştığında otomatik olarak .streamlit/config.toml dosyasını oluşturur.
+# Böylece telefonda "Aydınlık Mod" olsa bile site Zorla Siyah açılır.
+config_dir = ".streamlit"
+config_path = os.path.join(config_dir, "config.toml")
+
+if not os.path.exists(config_dir):
+    os.makedirs(config_dir)
+
+if not os.path.exists(config_path):
+    config_content = """
+[theme]
+base = "dark"
+primaryColor = "#3B82F6"
+backgroundColor = "#0F172A"
+secondaryBackgroundColor = "#1E293B"
+textColor = "#F8FAFC"
+font = "sans serif"
+    """
+    with open(config_path, "w") as f:
+        f.write(config_content)
+    # Ayarların aktif olması için sayfayı bir kez yenilememiz gerekebilir
+    try:
+        st.rerun()
+    except:
+        pass
 
 # --- 1. FORCE UPDATE (Kütüphaneleri Güncelle) ---
 try:
@@ -28,29 +56,30 @@ except:
 # --- PAGE CONFIG ---
 st.set_page_config(page_title="Solace Admin", layout="wide", page_icon="🌑")
 
-# --- CSS STYLING (ZORLA KARANLIK MOD - GRAFİK DÜZELTMELİ) ---
+# --- CSS STYLING (EKSTRA GÜÇLÜ BOYA) ---
 st.markdown("""
     <style>
     @import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;500;700&display=swap');
     
-    /* 1. Ana Arka Planı Zorla Boya */
-    [data-testid="stAppViewContainer"] {
+    /* Her şeyi zorla siyah yap */
+    [data-testid="stAppViewContainer"], body, html {
         background-color: #0F172A !important;
+        color: #F8FAFC !important;
     }
     
-    /* 2. Yan Menüyü (Sidebar) Boya */
+    /* Yan Menü */
     section[data-testid="stSidebar"] {
         background-color: #1E293B !important;
         border-right: 1px solid #334155;
     }
     
-    /* 3. Tüm Yazıları Beyaz/Gri Yap */
-    h1, h2, h3, h4, h5, h6, p, span, div, label, li {
+    /* Yazılar */
+    h1, h2, h3, h4, h5, h6, p, span, div, label, li, a {
         color: #F8FAFC !important;
         font-family: 'Inter', sans-serif;
     }
     
-    /* 4. Kutucukları (Input), Butonları ve Tabloları Düzelt */
+    /* Kutucuklar (Input) */
     div[data-baseweb="input"], div[data-baseweb="textarea"], div[data-baseweb="select"] {
         background-color: #334155 !important;
         border: 1px solid #475569 !important;
@@ -59,22 +88,10 @@ st.markdown("""
     input, textarea, select {
         color: white !important;
         caret-color: white !important;
+        background-color: transparent !important;
     }
     
-    /* 5. Metrik Kutuları */
-    div[data-testid="stMetric"] {
-        background-color: #1E293B !important;
-        border: 1px solid #334155 !important;
-        padding: 20px;
-        border-radius: 15px;
-        text-align: center;
-    }
-    div[data-testid="stMetricValue"] {
-        font-size: 2rem !important;
-        color: #3B82F6 !important;
-    }
-
-    /* 6. Üst Şeridi Gizle */
+    /* Header Gizle */
     header[data-testid="stHeader"] {
         background-color: rgba(0,0,0,0) !important;
     }
@@ -99,7 +116,7 @@ except Exception as e:
     st.error(f"⚠️ Configuration Error: Check your secrets. Error: {e}")
     st.stop()
 
-# --- 3. GARANTİ MODEL BULUCU (Dynamic Discovery) ---
+# --- 3. GARANTİ MODEL BULUCU ---
 def get_working_model():
     try:
         for m in genai.list_models():
@@ -358,11 +375,11 @@ if menu_selection == "🏠 Dashboard":
         st.subheader("Request Distribution")
         if not df_msgs.empty and "Category" in df_msgs.columns:
             fig = px.pie(df_msgs, names='Category', hole=0.4)
-            # --- DÜZELTME BURADA: Grafik Arka Planını Şeffaf Yapıyoruz ---
+            # --- Grafik Şeffaflığı ---
             fig.update_layout(
                 paper_bgcolor="rgba(0,0,0,0)", 
                 plot_bgcolor="rgba(0,0,0,0)",
-                font=dict(color="white") # Yazılar Beyaz Olsun
+                font=dict(color="white") 
             )
             st.plotly_chart(fig, use_container_width=True)
     with col2:
