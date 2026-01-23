@@ -59,15 +59,12 @@ except Exception as e:
     st.stop()
 
 # --- 3. GARANTİ MODEL BULUCU (Dynamic Discovery) ---
-# En güvenli yöntem: Google'a "Elinizdekileri listele" deyip ilk çalışanı almak.
 def get_working_model():
     try:
-        # Önce sistemdeki tüm modelleri listele
         for m in genai.list_models():
-            # Eğer model metin üretebiliyorsa (generateContent) onu seç ve döngüyü kır
             if 'generateContent' in m.supported_generation_methods:
                 return m.name
-        return "models/gemini-pro" # Hiçbir şey bulamazsa son çare
+        return "models/gemini-pro"
     except:
         return "models/gemini-pro"
 
@@ -75,7 +72,8 @@ def get_working_model():
 if "bot_rules" not in st.session_state:
     st.session_state.bot_rules = """1. Return period is 14 days.
 2. Opened products cannot be returned.
-3. Shipping is 50 TL for orders under 500 TL."""
+3. Shipping is 50 TL for orders under 500 TL.
+4. If the product is not in the Product List, say you don't have stock info."""
 
 # --- 5. DATA FETCHING ---
 @st.cache_data(ttl=60)
@@ -98,16 +96,38 @@ def get_data():
 @st.cache_data(ttl=60)
 def get_products():
     try:
-        sheet = client.open_by_url(SHEET_URL).worksheet("Urunler")
+        # Hata önleyici: Müşteri sayfa adını yanlış yazarsa veya Urunler sayfası yoksa patlamasın
+        try:
+            sheet = client.open_by_url(SHEET_URL).worksheet("Urunler")
+        except:
+            # Eğer Urunler sayfası yoksa boş dataframe dön
+            return pd.DataFrame(), 0, ""
+
         data = sheet.get_all_values()
         if len(data) > 1:
-            df = pd.DataFrame(data[1:], columns=["ProductName", "Stock", "Price", "Description"])
-            df["Price"] = pd.to_numeric(df["Price"].astype(str).str.replace(' TL','').str.replace('$',''), errors='coerce').fillna(0)
-            df["Stock"] = pd.to_numeric(df["Stock"], errors='coerce').fillna(0)
-            total_value = (df["Price"] * df["Stock"]).sum()
-            return df, total_value
-        return pd.DataFrame(), 0
-    except: return pd.DataFrame(), 0
+            # Sütun isimlerini standartlaştırıyoruz (ilk satır başlık kabul edilir)
+            headers = data[0]
+            df = pd.DataFrame(data[1:], columns=headers)
+            
+            # AI için metin formatına çevir (Ürün bilgisi: Adı X, Fiyatı Y...)
+            product_text_list = []
+            for index, row in df.iterrows():
+                row_str = ", ".join([f"{col}: {val}" for col, val in row.items() if val])
+                product_text_list.append(f"- {row_str}")
+            product_context = "\n".join(product_text_list)
+
+            # Dashboard hesaplamaları için basit temizlik (Hata verirse 0 kabul et)
+            total_value = 0
+            if "Price" in df.columns and "Stock" in df.columns:
+                try:
+                    price_clean = pd.to_numeric(df["Price"].astype(str).str.replace(r'[^\d.]', '', regex=True), errors='coerce').fillna(0)
+                    stock_clean = pd.to_numeric(df["Stock"], errors='coerce').fillna(0)
+                    total_value = (price_clean * stock_clean).sum()
+                except: pass
+            
+            return df, total_value, product_context
+        return pd.DataFrame(), 0, ""
+    except: return pd.DataFrame(), 0, ""
 
 # --- 6. STRATEGIC REPORT ---
 def generate_strategic_report(df):
@@ -123,28 +143,41 @@ def generate_strategic_report(df):
     💡 **Action Plan:** [Recommendations]
     """
     try:
-        # Modeli dinamik buluyoruz
         model_name = get_working_model()
         model = genai.GenerativeModel(model_name)
         response = model.generate_content(prompt)
         return response.text
     except Exception as e: return f"Report Error using {model_name}: {str(e)}"
 
-# --- 7. AI RESPONSE ---
-def get_ai_response(user_message, custom_rules):
+# --- 7. AI RESPONSE (GELİŞMİŞ) ---
+def get_ai_response(user_message, custom_rules, product_info):
     prompt = f"""
     You are 'Solace', a professional e-commerce assistant.
-    BUSINESS RULES:
-    Date: {datetime.date.today().strftime("%Y-%m-%d")}
+    
+    --- CONTEXT ---
+    DATE: {datetime.date.today().strftime("%Y-%m-%d")}
+    
+    --- BUSINESS RULES ---
     {custom_rules}
-    Customer Message: "{user_message}"
-    TASK: Reply politely adhering strictly to the rules.
+    
+    --- PRODUCT LIST / INVENTORY ---
+    {product_info}
+    (If the customer asks about a product NOT in this list, state that you cannot find information about it.)
+    
+    --- CUSTOMER MESSAGE ---
+    "{user_message}"
+    
+    --- INSTRUCTIONS ---
+    1. LANGUAGE: You MUST reply in ENGLISH only. Even if the input is Turkish, reply in English.
+    2. ACCURACY: Use the Product List above to answer price/stock questions. Do not invent prices.
+    3. SAFETY: If the answer is not in the Rules or Product List, reply: "I don't have the details for this specific query right now. Our support team has been notified and will contact you shortly." and mark category as OTHER.
+    4. CATEGORY: Use exactly: RETURN, SHIPPING, QUESTION, or OTHER.
+    
     FORMAT: 
     CATEGORY: [RETURN/SHIPPING/QUESTION/OTHER] 
-    ANSWER: [Your reply text]
+    ANSWER: [Your polite reply text in English]
     """
     try:
-        # Modeli dinamik buluyoruz
         model_name = get_working_model()
         model = genai.GenerativeModel(model_name)
         response = model.generate_content(prompt)
@@ -167,14 +200,32 @@ def send_mail_reply(to_email, subject, body):
         return True
     except: return False
 
-# --- 9. PROCESS EMAILS ---
+# --- 9. PROCESS EMAILS (ESNEK KLASÖR SEÇİMİ) ---
 def process_emails():
+    # Ürün bilgisini çekiyoruz ki cevaba ekleyelim
+    _, _, product_context = get_products()
+    
     with st.spinner("Solace is checking emails..."):
         st.write("🔌 Connecting to Gmail...")
         try:
             mail = imaplib.IMAP4_SSL("imap.gmail.com")
             mail.login(EMAIL_USER, EMAIL_PASS)
-            mail.select("is") 
+            
+            # --- DİNAMİK KLASÖR SEÇİMİ ---
+            # Secrets'tan 'mail_klasoru' bilgisini al. Yoksa varsayılan 'INBOX' olsun.
+            # Müşteri secrets'a mail_klasoru = "is" yazarsa "is" klasörüne bakar.
+            # Hiçbir şey yazmazsa INBOX'a bakar.
+            target_folder = st.secrets.get("mail_klasoru", "INBOX")
+            
+            # Klasörü seçmeyi dene
+            status, messages = mail.select(target_folder)
+            
+            if status != 'OK':
+                st.error(f"❌ Error: The folder '{target_folder}' was not found in this Gmail account. Please check 'secrets' configuration.")
+                return
+            else:
+                st.info(f"📂 Scanning folder: {target_folder}")
+
         except Exception as e:
             st.error(f"Gmail Connection Error: {e}")
             return
@@ -183,7 +234,7 @@ def process_emails():
         mail_ids = messages[0].split()
 
         if not mail_ids:
-            st.toast("📭 No new emails found.")
+            st.toast(f"📭 No new emails found in {target_folder}.")
             return
 
         st.info(f"📢 {len(mail_ids)} new emails found.")
@@ -212,7 +263,9 @@ def process_emails():
                         else: body = msg.get_payload(decode=True).decode()
 
                         st.write(f"📩 Processing: {subject}")
-                        ai_full_response = get_ai_response(body, current_rules)
+                        
+                        # AI Fonksiyonuna ürün bilgisini de gönderiyoruz
+                        ai_full_response = get_ai_response(body, current_rules, product_context)
 
                         kategori = "GENERAL"
                         cevap = ai_full_response
@@ -253,7 +306,7 @@ with st.sidebar:
 
 # --- DATA PREP ---
 df_msgs = get_data()
-df_prods, total_stock_value = get_products()
+df_prods, total_stock_value, _ = get_products()
 
 # --- PAGES ---
 
@@ -286,6 +339,9 @@ elif menu_selection == "📦 Inventory":
     st.title("📦 Inventory Management")
     if not df_prods.empty:
         st.dataframe(df_prods, use_container_width=True)
+    else:
+        st.info("No product data found. Please add products to the 'Urunler' sheet.")
+        
     with st.expander("➕ Add New Product"):
         with st.form("add_prod"):
             c1, c2 = st.columns(2)
@@ -298,7 +354,7 @@ elif menu_selection == "📦 Inventory":
                     sheet = client.open_by_url(SHEET_URL).worksheet("Urunler")
                     sheet.append_row([isim, stok, fiyat, aciklama])
                     st.success("Product Added!"); st.rerun()
-                except: st.error("Error saving data.")
+                except: st.error("Error saving data. Make sure 'Urunler' sheet exists.")
 
 elif menu_selection == "📊 Analysis":
     st.title("Strategic Message Analysis")
@@ -306,9 +362,7 @@ elif menu_selection == "📊 Analysis":
         st.markdown("### 🧠 Solace AI Report")
         st.caption("AI analyzes incoming messages and provides critical alerts.")
         
-        # DEBUG: Hangi modelin çalıştığını ekrana ufakça yazdırıyorum ki emin olalım
         try:
-             # Bu sadece kullanıcıya güven vermek için
              active_model = get_working_model()
              st.caption(f"Active Engine: `{active_model}`")
         except: pass
