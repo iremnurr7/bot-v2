@@ -389,19 +389,45 @@ elif menu_selection == "📦 Inventory":
     else:
         st.info("No product data found.")
         
-    with st.expander("➕ Add New Product"):
+    with st.expander("➕ Add New Product", expanded=True):
         with st.form("add_prod"):
             c1, c2 = st.columns(2)
             isim = c1.text_input("Product Name")
-            fiyat = c1.number_input("Price (TL)", min_value=0.0)
-            stok = c2.number_input("Stock Qty", min_value=0)
+            fiyat = c1.number_input("Price (TL)", min_value=0.0, format="%.2f")
+            stok = c2.number_input("Stock Qty", min_value=0, step=1)
             aciklama = c2.text_input("Description")
-            if st.form_submit_button("Save to Database"):
-                try:
-                    sheet = client.open_by_url(SHEET_URL).worksheet("Urunler")
-                    sheet.append_row([isim, stok, fiyat, aciklama])
-                    st.success("Product Added!"); st.rerun()
-                except: st.error("Error saving data.")
+            
+            # --- DÜZELTİLEN KISIM: GÜVENLİ KAYIT ---
+            submitted = st.form_submit_button("Save to Database")
+            if submitted:
+                if not isim:
+                    st.warning("Please enter a product name.")
+                else:
+                    try:
+                        # 1. BAĞLANTIYI TAZELE (Auth Refresh)
+                        with st.spinner("Connecting to database..."):
+                            scope = ['https://spreadsheets.google.com/feeds', 'https://www.googleapis.com/auth/drive']
+                            key_dict = json.loads(st.secrets["google_anahtari"]["dosya_icerigi"])
+                            creds = ServiceAccountCredentials.from_json_keyfile_dict(key_dict, scope)
+                            client_refresh = gspread.authorize(creds)
+                            
+                            # 2. SEKMEYİ AÇ (Worksheet)
+                            sheet = client_refresh.open_by_url(SHEET_URL).worksheet("Urunler")
+                            
+                            # 3. VERİYİ HAZIRLA
+                            row_data = [str(isim), int(stok), float(fiyat), str(aciklama)]
+                            
+                            # 4. KAYDET
+                            sheet.append_row(row_data)
+                        
+                        st.success(f"✅ '{isim}' added successfully!")
+                        time.sleep(1)
+                        st.rerun()
+                        
+                    except Exception as e:
+                        # HATA DETAYINI GÖSTER
+                        st.error(f"❌ Error Saving Data: {str(e)}")
+                        st.info("İpucu: Google Sheet'teki sekme adının 'Urunler' olduğundan emin ol.")
 
 elif menu_selection == "📊 Analysis":
     st.title("Strategic Message Analysis")
